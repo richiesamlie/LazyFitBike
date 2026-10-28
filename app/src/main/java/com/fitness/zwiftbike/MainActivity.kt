@@ -35,6 +35,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -100,6 +101,10 @@ class MainActivity : ComponentActivity() {
                 onRequestOsrmRoute = rideViewModel::requestCustomOsrmRoute,
                 onSetMapModalOpen = rideViewModel::setMapModalOpen,
                 onSetStravaModalOpen = rideViewModel::setStravaModalOpen,
+                onSetUpdateModalOpen = rideViewModel::setUpdateModalOpen,
+                onCheckGithubUpdates = rideViewModel::checkGithubUpdates,
+                onDownloadPhoneUpdate = { rideViewModel.downloadAndInstallPhoneUpdate(context) },
+                onRelayWatchUpdate = { rideViewModel.downloadAndRelayWatchUpdate(context) },
                 onExportStravaGpx = { rideViewModel.exportAndShareStravaGpx(context) },
                 onUploadDirectToStrava = rideViewModel::uploadDirectToStrava
             )
@@ -142,6 +147,10 @@ fun VeloPulseCockpitScreen(
     onRequestOsrmRoute: (Double, Double, Double, Double) -> Unit,
     onSetMapModalOpen: (Boolean) -> Unit,
     onSetStravaModalOpen: (Boolean) -> Unit,
+    onSetUpdateModalOpen: (Boolean) -> Unit,
+    onCheckGithubUpdates: () -> Unit,
+    onDownloadPhoneUpdate: () -> Unit,
+    onRelayWatchUpdate: () -> Unit,
     onExportStravaGpx: () -> Unit,
     onUploadDirectToStrava: (String) -> Unit
 ) {
@@ -190,7 +199,6 @@ fun VeloPulseCockpitScreen(
             .fillMaxSize()
             .background(Color(0xFF09090B))
     ) {
-        // Layer 0: 3D World + Interactive OpenStreetMap WebView
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
@@ -213,7 +221,6 @@ fun VeloPulseCockpitScreen(
             }
         )
 
-        // Layer 10 & 20: 4-Zone Perimeter HUD
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -318,7 +325,7 @@ fun VeloPulseCockpitScreen(
                         }
                     }
 
-                    // ZONE B: Route Progress Pod + Strava Trackpoint Counter
+                    // ZONE B: Route Progress Pod
                     HudPod(modifier = Modifier.width(250.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -369,7 +376,7 @@ fun VeloPulseCockpitScreen(
                         }
                     }
 
-                    // ZONE C: Corner Live GPS Mini-Map + Road Grade (Tap to Expand Map)
+                    // ZONE C: Corner Live GPS Mini-Map + Grade
                     HudPod(
                         modifier = Modifier
                             .width(235.dp)
@@ -418,7 +425,6 @@ fun VeloPulseCockpitScreen(
 
                         Spacer(modifier = Modifier.height(5.dp))
 
-                        // Live Vector GPS Route Mini-Map Preview inside Zone C
                         MiniGpsRouteCanvas(
                             routeId = state.activeRouteId,
                             distanceMeters = state.distanceMeters,
@@ -428,7 +434,6 @@ fun VeloPulseCockpitScreen(
                     }
                 }
 
-                // R-27 Empty / Signal Lost Banner or Route Status Message
                 if (state.connectionState == ConnectionState.WAITING_FOR_WATCH ||
                     state.connectionState == ConnectionState.SIGNAL_LOST
                 ) {
@@ -471,7 +476,7 @@ fun VeloPulseCockpitScreen(
                 }
             }
 
-            // CENTER OVERLAY PANELS (When Full-Screen Map or Strava Co-op Modal is Open)
+            // CENTER MODALS (Map Modal, Strava Modal, or GitHub OTA Update Modal)
             if (state.isMapModalOpen) {
                 Row(
                     modifier = Modifier
@@ -479,8 +484,6 @@ fun VeloPulseCockpitScreen(
                         .weight(1f)
                         .padding(vertical = 6.dp)
                 ) {
-                    // Left Panel (290dp): Route Selector, GPX Import, OSRM Instructions
-                    // Right area is left transparent so the WebView's interactive #fullmap-container is clickable!
                     HudPod(
                         modifier = Modifier
                             .width(290.dp)
@@ -585,7 +588,6 @@ fun VeloPulseCockpitScreen(
                     }
                 }
             } else if (state.isStravaModalOpen) {
-                // STRAVA CO-OP & GPX EXPORT MODAL
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -718,6 +720,163 @@ fun VeloPulseCockpitScreen(
                         }
                     }
                 }
+            } else if (state.isUpdateModalOpen) {
+                // GITHUB OTA SELF-UPDATE MODAL (Phone + Galaxy Watch 4)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    HudPod(
+                        modifier = Modifier
+                            .width(480.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "GITHUB RELEASES OTA UPDATER",
+                                    color = AccentOrange,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Text(
+                                    text = "Repo: richiesamlie/LazyFitBike",
+                                    color = TextMutedZinc,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Button(
+                                onClick = { onSetUpdateModalOpen(false) },
+                                modifier = Modifier.heightIn(min = 36.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = TextPrimaryWhite
+                                )
+                            ) {
+                                Text(text = "Close", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(BgControlDark)
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            MetricColumn(
+                                label = "INSTALLED",
+                                value = state.installedVersionName,
+                                unit = "Phone & Watch"
+                            )
+                            MetricColumn(
+                                label = "GITHUB LATEST",
+                                value = state.latestReleaseTag,
+                                unit = "Release Tag"
+                            )
+                            MetricColumn(
+                                label = "DOWNLOAD",
+                                value = "${state.updateDownloadProgress}%",
+                                unit = "Progress"
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        LinearProgressIndicator(
+                            progress = { (state.updateDownloadProgress / 100f).coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = AccentOrange,
+                            trackColor = BgControlDark
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = state.updateStatusMessage,
+                            style = TabularStyle,
+                            color = SignalEmerald,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onCheckGithubUpdates,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = TextPrimaryWhite
+                                )
+                            ) {
+                                Text(
+                                    text = "Check GitHub",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Button(
+                                onClick = onDownloadPhoneUpdate,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AccentOrange,
+                                    contentColor = TextPrimaryWhite
+                                )
+                            ) {
+                                Text(
+                                    text = "Update Phone APK",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Button(
+                            onClick = onRelayWatchUpdate,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = BgControlDark,
+                                contentColor = TextPrimaryWhite
+                            )
+                        ) {
+                            Text(
+                                text = "Download & Push Watch APK via Bluetooth",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
 
             // BOTTOM PERIMETER ROW
@@ -726,7 +885,6 @@ fun VeloPulseCockpitScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom
             ) {
-                // Bottom-Left Controls Pod
                 HudPod {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -790,7 +948,23 @@ fun VeloPulseCockpitScreen(
                             )
                         ) {
                             Text(
-                                text = "Finish & Strava",
+                                text = "Strava",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Button(
+                            onClick = { onSetUpdateModalOpen(!state.isUpdateModalOpen) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (state.isUpdateModalOpen) AccentOrange else BgControlDark,
+                                contentColor = TextPrimaryWhite
+                            )
+                        ) {
+                            Text(
+                                text = "Update",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -819,14 +993,14 @@ fun VeloPulseCockpitScreen(
                         if (state.connectionState == ConnectionState.DEMO_MODE) {
                             Column(
                                 modifier = Modifier
-                                    .width(120.dp)
+                                    .width(105.dp)
                                     .padding(horizontal = 2.dp)
                             ) {
                                 Text(
                                     text = "${state.demoSliderEffort.toInt()} RPM",
                                     style = TabularStyle,
                                     color = TextMutedZinc,
-                                    fontSize = 11.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Slider(

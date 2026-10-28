@@ -3,6 +3,7 @@ package com.fitness.zwiftbike.wear
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -41,12 +42,50 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import com.google.android.gms.wearable.ChannelClient
+import com.google.android.gms.wearable.Wearable
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import java.io.File
 import kotlin.math.roundToInt
 
 /**
- * Samsung Galaxy Watch 4 circular UI following the inscribed octagon layout from sketchboard.html.
+ * Samsung Galaxy Watch 4 circular UI with inscribed safe octagon layout,
+ * direct GitHub OTA updater, and Bluetooth ChannelClient APK relay receiver.
  */
 class MainActivity : ComponentActivity() {
+
+    private val updateStatusFlow = MutableStateFlow("OTA Update")
+    private var incomingWatchApkFile: File? = null
+
+    private val channelCallback = object : ChannelClient.ChannelCallback() {
+        override fun onChannelOpened(channel: ChannelClient.Channel) {
+            if (channel.path == WatchGithubUpdater.WATCH_APK_CHANNEL_PATH) {
+                val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
+                val destFile = File(updatesDir, "LazyFitBike-watch-bt.apk")
+                incomingWatchApkFile = destFile
+                updateStatusFlow.value = "Receiving BT APK..."
+                Wearable.getChannelClient(this@MainActivity)
+                    .receiveFile(channel, Uri.fromFile(destFile), false)
+            }
+        }
+
+        override fun onInputClosed(
+            channel: ChannelClient.Channel,
+            closeReason: Int,
+            appSpecificErrorCode: Int
+        ) {
+            if (channel.path == WatchGithubUpdater.WATCH_APK_CHANNEL_PATH) {
+                val readyFile = incomingWatchApkFile
+                if (readyFile != null && readyFile.exists() && readyFile.length() > 0L) {
+                    updateStatusFlow.value = "BT APK Ready: Install"
+                    val msg = WatchGithubUpdater.promptInstallWatchApk(this@MainActivity, readyFile)
+                    updateStatusFlow.value = msg
+                }
+            }
+        }
+    }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -62,10 +101,16 @@ class MainActivity : ComponentActivity() {
             permissionLauncher.launch(Manifest.permission.BODY_SENSORS)
         }
 
+        runCatching {
+            Wearable.getChannelClient(this).registerChannelCallback(channelCallback)
+        }
+
         setContent {
             val workoutState by SensorWorkoutService.state.collectAsState()
+            val updateStatus by updateStatusFlow.collectAsState()
             WatchSensorScreen(
                 state = workoutState,
+                updateStatus = updateStatus,
                 onToggleMode = { sendServiceAction(SensorWorkoutService.ACTION_TOGGLE_MODE) },
                 onToggleActive = {
                     val action = if (workoutState.isActive) {
@@ -75,8 +120,28 @@ class MainActivity : ComponentActivity() {
                     }
                     sendServiceAction(action)
                 },
-                onToggleSim = { sendServiceAction(SensorWorkoutService.ACTION_TOGGLE_SIM) }
+                onToggleSim = { sendServiceAction(SensorWorkoutService.ACTION_TOGGLE_SIM) },
+                onTriggerGithubUpdate = { triggerWatchOtaUpdate() }
             )
+        }
+    }
+
+    private fun triggerWatchOtaUpdate() {
+        val existingBtFile = incomingWatchApkFile
+        if (existingBtFile != null && existingBtFile.exists() && existingBtFile.length() > 0L) {
+            updateStatusFlow.value = WatchGithubUpdater.promptInstallWatchApk(this, existingBtFile)
+            return
+        }
+        lifecycleScope.launch {
+            val downloaded = WatchGithubUpdater.downloadLatestWatchApkFromGithub(
+                context = this@MainActivity,
+                onStatus = { status -> updateStatusFlow.value = status }
+            )
+            if (downloaded != null) {
+                incomingWatchApkFile = downloaded
+                val res = WatchGithubUpdater.promptInstallWatchApk(this@MainActivity, downloaded)
+                updateStatusFlow.value = res
+            }
         }
     }
 
@@ -85,6 +150,13 @@ class MainActivity : ComponentActivity() {
             this.action = action
         }
         startService(intent)
+    }
+
+    override fun onDestroy() {
+        runCatching {
+            Wearable.getChannelClient(this).unregisterChannelCallback(channelCallback)
+        }
+        super.onDestroy()
     }
 }
 
@@ -103,16 +175,17 @@ private val TabularStyle = TextStyle(fontFeatureSettings = "tnum")
 @Composable
 fun WatchSensorScreen(
     state: WatchWorkoutState,
+    updateStatus: String,
     onToggleMode: () -> Unit,
     onToggleActive: () -> Unit,
-    onToggleSim: () -> Unit
+    onToggleSim: () -> Unit,
+    onTriggerGithubUpdate: () -> Unit
 ) {
-    // Inscribed safe octagon padding for round Galaxy Watch 4 (40mm/44mm)
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(BgPureBlack)
-            .padding(vertical = 18.dp, horizontal = 24.dp),
+            .padding(vertical = 16.dp, horizontal = 22.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -120,7 +193,7 @@ fun WatchSensorScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. Top Arc: Connection Status + Mode Badge (tappable to toggle bench simulator)
+            // 1. Top Safe Arc: Link Status + Mode Badge (tappable for SIM)
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
@@ -142,7 +215,7 @@ fun WatchSensorScreen(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 val modeText = buildString {
-                    append(if (state.mode == "ANKLE") "ANKLE MODE" else "WRIST MODE")
+                    append(if (state.mode == "ANKLE") "ANKLE" else "WRIST")
                     if (state.isSimulated) append(" (SIM)")
                 }
                 Text(
@@ -153,7 +226,7 @@ fun WatchSensorScreen(
                 )
             }
 
-            // 2. Center Focal Point: Single 44sp Tabular Metric + Secondary Pill
+            // 2. Center Focal Point: 44sp Tabular Metric + Secondary Pill + OTA Update Pill
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -172,40 +245,62 @@ fun WatchSensorScreen(
                     text = primaryValue,
                     style = TabularStyle,
                     color = TextWhite,
-                    fontSize = 44.sp,
+                    fontSize = 42.sp,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center
                 )
                 Text(
                     text = primaryUnit,
                     color = TextMutedZinc,
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
-                // Secondary Pill
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(SurfaceZinc)
-                        .border(1.dp, BorderZinc, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 10.dp, vertical = 3.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val secondaryLabel = if (state.mode == "ANKLE") {
-                        val hrDisplay = if (state.bpm > 0) "${state.bpm} BPM" else "HR READY"
-                        "HR: $hrDisplay"
-                    } else {
-                        "CAD: ${state.rpm.roundToInt()} RPM"
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(SurfaceZinc)
+                            .border(1.dp, BorderZinc, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        val secondaryLabel = if (state.mode == "ANKLE") {
+                            val hrDisplay = if (state.bpm > 0) "${state.bpm} BPM" else "HR"
+                            "HR: $hrDisplay"
+                        } else {
+                            "${state.rpm.roundToInt()} RPM"
+                        }
+                        Text(
+                            text = secondaryLabel,
+                            style = TabularStyle,
+                            color = SignalRose,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
-                    Text(
-                        text = secondaryLabel,
-                        style = TabularStyle,
-                        color = SignalRose,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+
+                    // Direct GitHub OTA Update Trigger Pill
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(SurfaceZinc)
+                            .border(1.dp, AccentOrange, RoundedCornerShape(8.dp))
+                            .clickable { onTriggerGithubUpdate() }
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = updateStatus,
+                            style = TabularStyle,
+                            color = AccentOrange,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
 

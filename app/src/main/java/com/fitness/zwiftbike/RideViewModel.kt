@@ -61,6 +61,14 @@ data class RideUiState(
     val avgRpm: Int = 0,
     val isMapModalOpen: Boolean = false,
     val isStravaModalOpen: Boolean = false,
+    val isUpdateModalOpen: Boolean = false,
+    val installedVersionName: String = "v1.1.0",
+    val latestReleaseTag: String = "Unchecked",
+    val latestReleaseName: String = "",
+    val latestPhoneApkUrl: String? = null,
+    val latestWatchApkUrl: String? = null,
+    val updateDownloadProgress: Int = 0,
+    val updateStatusMessage: String = "Tap Check GitHub to inspect richiesamlie/LazyFitBike releases.",
     val statusBannerMessage: String = ""
 )
 
@@ -127,7 +135,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startPhysicsLoop() {
         viewModelScope.launch {
-            val dt = 0.05f // 20 Hz physics loop
+            val dt = 0.05f
             while (isActive) {
                 val nowMs = System.currentTimeMillis()
                 val current = _uiState.value
@@ -188,7 +196,6 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // Interpolate current GPS position & real-world road slope from activeRoute
                 val gpsNow = GpsRouteEngine.interpolateAtDistance(activeRoute, physics.totalDistanceMeters)
 
                 val stepResult = physics.step(
@@ -206,7 +213,6 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                 if (stepResult.speedKmh > 0.5f) {
                     elapsedAccumulatorSec += dt
                     val wholeSec = elapsedAccumulatorSec.toInt()
-                    // Record 1 Hz GPS + HR + Cadence + Watts TrackPoint for Strava Co-op
                     if (wholeSec > lastRecordedElapsedSec) {
                         lastRecordedElapsedSec = wholeSec
                         val wInt = stepResult.watts.roundToInt()
@@ -295,7 +301,6 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             if (osrmRoute != null) {
                 applyNewRoute(osrmRoute, "Loaded OSRM road route (${String.format("%.1f", osrmRoute.totalDistanceMeters / 1000f)} km)")
             } else {
-                // Offline fallback: build direct densified road between the two tapped coordinates
                 val direct = GpsRouteEngine.buildRouteFromRawPoints(
                     id = "custom_direct_${System.currentTimeMillis()}",
                     name = "Custom Pin Route",
@@ -337,15 +342,149 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     fun setMapModalOpen(open: Boolean) {
         _uiState.value = _uiState.value.copy(
             isMapModalOpen = open,
-            isStravaModalOpen = if (open) false else _uiState.value.isStravaModalOpen
+            isStravaModalOpen = false,
+            isUpdateModalOpen = false
         )
     }
 
     fun setStravaModalOpen(open: Boolean) {
         _uiState.value = _uiState.value.copy(
             isStravaModalOpen = open,
-            isMapModalOpen = if (open) false else _uiState.value.isMapModalOpen
+            isMapModalOpen = false,
+            isUpdateModalOpen = false
         )
+    }
+
+    fun setUpdateModalOpen(open: Boolean) {
+        _uiState.value = _uiState.value.copy(
+            isUpdateModalOpen = open,
+            isMapModalOpen = false,
+            isStravaModalOpen = false
+        )
+        if (open && _uiState.value.latestReleaseTag == "Unchecked") {
+            checkGithubUpdates()
+        }
+    }
+
+    fun checkGithubUpdates() {
+        _uiState.value = _uiState.value.copy(
+            updateStatusMessage = "Checking GitHub API (richiesamlie/LazyFitBike)..."
+        )
+        viewModelScope.launch {
+            val info = GithubUpdater.fetchLatestRelease()
+            if (info != null) {
+                val hasPhone = info.phoneApkUrl != null
+                val hasWatch = info.watchApkUrl != null
+                _uiState.value = _uiState.value.copy(
+                    latestReleaseTag = info.tagName,
+                    latestReleaseName = info.releaseName,
+                    latestPhoneApkUrl = info.phoneApkUrl,
+                    latestWatchApkUrl = info.watchApkUrl,
+                    updateStatusMessage = "Found ${info.tagName} (Phone APK: $hasPhone, Watch APK: $hasWatch)"
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    updateStatusMessage = "No release found yet or offline. Push a release to richiesamlie/LazyFitBike."
+                )
+            }
+        }
+    }
+
+    fun downloadAndInstallPhoneUpdate(context: Context) {
+        viewModelScope.launch {
+            var phoneUrl = _uiState.value.latestPhoneApkUrl
+            if (phoneUrl.isNullOrEmpty()) {
+                val info = GithubUpdater.fetchLatestRelease()
+                phoneUrl = info?.phoneApkUrl
+                if (info != null) {
+                    _uiState.value = _uiState.value.copy(
+                        latestReleaseTag = info.tagName,
+                        latestPhoneApkUrl = info.phoneApkUrl,
+                        latestWatchApkUrl = info.watchApkUrl
+                    )
+                }
+            }
+            if (phoneUrl.isNullOrEmpty()) {
+                _uiState.value = _uiState.value.copy(
+                    updateStatusMessage = "No LazyFitBike-phone.apk asset found in latest GitHub release."
+                )
+                return@launch
+            }
+
+            _uiState.value = _uiState.value.copy(
+                updateDownloadProgress = 0,
+                updateStatusMessage = "Downloading LazyFitBike-phone.apk from GitHub..."
+            )
+            val file = GithubUpdater.downloadApkToFile(
+                context = context,
+                apkUrl = phoneUrl,
+                targetFileName = "LazyFitBike-phone.apk",
+                onProgress = { pct ->
+                    _uiState.value = _uiState.value.copy(updateDownloadProgress = pct)
+                }
+            )
+            if (file != null) {
+                val installMsg = GithubUpdater.promptInstallApk(context, file)
+                _uiState.value = _uiState.value.copy(
+                    updateDownloadProgress = 100,
+                    updateStatusMessage = installMsg
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    updateStatusMessage = "Failed to download Phone APK from GitHub."
+                )
+            }
+        }
+    }
+
+    fun downloadAndRelayWatchUpdate(context: Context) {
+        viewModelScope.launch {
+            var watchUrl = _uiState.value.latestWatchApkUrl
+            if (watchUrl.isNullOrEmpty()) {
+                val info = GithubUpdater.fetchLatestRelease()
+                watchUrl = info?.watchApkUrl
+                if (info != null) {
+                    _uiState.value = _uiState.value.copy(
+                        latestReleaseTag = info.tagName,
+                        latestPhoneApkUrl = info.phoneApkUrl,
+                        latestWatchApkUrl = info.watchApkUrl
+                    )
+                }
+            }
+            if (watchUrl.isNullOrEmpty()) {
+                _uiState.value = _uiState.value.copy(
+                    updateStatusMessage = "No LazyFitBike-watch.apk asset found in latest GitHub release."
+                )
+                return@launch
+            }
+
+            _uiState.value = _uiState.value.copy(
+                updateDownloadProgress = 0,
+                updateStatusMessage = "Downloading LazyFitBike-watch.apk from GitHub..."
+            )
+            val file = GithubUpdater.downloadApkToFile(
+                context = context,
+                apkUrl = watchUrl,
+                targetFileName = "LazyFitBike-watch.apk",
+                onProgress = { pct ->
+                    _uiState.value = _uiState.value.copy(updateDownloadProgress = pct)
+                }
+            )
+            if (file != null) {
+                _uiState.value = _uiState.value.copy(
+                    updateStatusMessage = "Streaming Watch APK over Bluetooth ChannelClient..."
+                )
+                val relayMsg = GithubUpdater.pushWatchApkOverBluetooth(context, file)
+                _uiState.value = _uiState.value.copy(
+                    updateDownloadProgress = 100,
+                    updateStatusMessage = relayMsg
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    updateStatusMessage = "Failed to download Watch APK from GitHub."
+                )
+            }
+        }
     }
 
     fun exportAndShareStravaGpx(context: Context) {
@@ -387,7 +526,6 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                 return ArrayList(recordedPoints)
             }
         }
-        // If user exports before pedaling, synthesize a short preview track along the active route
         val baseNow = System.currentTimeMillis() - 15_000L
         return (0..14).map { sec ->
             val pt = GpsRouteEngine.interpolateAtDistance(activeRoute, sec * 7.5f)
