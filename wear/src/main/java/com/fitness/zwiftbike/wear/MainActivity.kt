@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -88,17 +89,27 @@ class MainActivity : ComponentActivity() {
     }
 
     private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
+        ActivityResultContracts.RequestMultiplePermissions()
     ) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        val neededPermissions = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.BODY_SENSORS)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            permissionLauncher.launch(Manifest.permission.BODY_SENSORS)
+            neededPermissions.add(Manifest.permission.BODY_SENSORS)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            neededPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (neededPermissions.isNotEmpty()) {
+            permissionLauncher.launch(neededPermissions.toTypedArray())
         }
 
         runCatching {
@@ -149,7 +160,13 @@ class MainActivity : ComponentActivity() {
         val intent = Intent(this, SensorWorkoutService::class.java).apply {
             this.action = action
         }
-        startService(intent)
+        runCatching {
+            if (action == SensorWorkoutService.ACTION_START) {
+                ContextCompat.startForegroundService(this, intent)
+            } else {
+                startService(intent)
+            }
+        }
     }
 
     override fun onDestroy() {

@@ -38,9 +38,10 @@ object WatchGithubUpdater {
                 }
 
             val tag = tagRegex.find(releaseJson)?.groupValues?.getOrNull(1) ?: "latest"
+            val allUrls = downloadUrlRegex.findAll(releaseJson).map { it.groupValues[1] }.toList()
+            val tagScopedUrls = allUrls.filter { it.contains("/$tag/") }.ifEmpty { allUrls }
             var watchApkUrl: String? = null
-            for (match in downloadUrlRegex.findAll(releaseJson)) {
-                val url = match.groupValues[1]
+            for (url in tagScopedUrls) {
                 val lower = url.lowercase()
                 if (lower.contains("watch") || lower.contains("wear")) {
                     watchApkUrl = url
@@ -84,6 +85,7 @@ object WatchGithubUpdater {
 
             val total = conn.contentLengthLong
             var downloaded = 0L
+            var lastReportedPct = -1
             conn.inputStream.use { input ->
                 FileOutputStream(outFile).use { output ->
                     val buf = ByteArray(8192)
@@ -93,7 +95,10 @@ object WatchGithubUpdater {
                         downloaded += read
                         if (total > 0L) {
                             val pct = ((downloaded * 100L) / total).toInt().coerceIn(0, 100)
-                            onStatus("DL $tag ($pct%)")
+                            if (pct != lastReportedPct) {
+                                lastReportedPct = pct
+                                onStatus("DL $tag ($pct%)")
+                            }
                         }
                     }
                     output.flush()

@@ -49,8 +49,10 @@ object GithubUpdater {
         var phoneUrl: String? = null
         var watchUrl: String? = null
 
-        for (match in downloadUrlRegex.findAll(jsonText)) {
-            val url = match.groupValues[1]
+        val allUrls = downloadUrlRegex.findAll(jsonText).map { it.groupValues[1] }.toList()
+        val tagScopedUrls = allUrls.filter { it.contains("/$tag/") }.ifEmpty { allUrls }
+
+        for (url in tagScopedUrls) {
             val lower = url.lowercase()
             if (lower.contains("watch") || lower.contains("wear")) {
                 if (watchUrl == null) watchUrl = url
@@ -127,6 +129,7 @@ object GithubUpdater {
             if (conn.responseCode !in 200..299) return@withContext null
             val totalBytes = conn.contentLengthLong
             var downloadedBytes = 0L
+            var lastReportedPct = -1
 
             conn.inputStream.use { input ->
                 FileOutputStream(outFile).use { output ->
@@ -137,7 +140,10 @@ object GithubUpdater {
                         downloadedBytes += read
                         if (totalBytes > 0L) {
                             val pct = ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 100)
-                            onProgress(pct)
+                            if (pct != lastReportedPct) {
+                                lastReportedPct = pct
+                                onProgress(pct)
+                            }
                         }
                     }
                     output.flush()

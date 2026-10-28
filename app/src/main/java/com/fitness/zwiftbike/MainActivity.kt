@@ -14,6 +14,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -224,18 +226,19 @@ fun VeloPulseCockpitScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(12.dp),
+                .safeDrawingPadding()
+                .padding(10.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             // TOP PERIMETER ROW
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.Top
                 ) {
                     // ZONE A: Primary Effort Pod
-                    HudPod(modifier = Modifier.width(215.dp)) {
+                    HudPod(modifier = Modifier.weight(1f)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -326,7 +329,7 @@ fun VeloPulseCockpitScreen(
                     }
 
                     // ZONE B: Route Progress Pod
-                    HudPod(modifier = Modifier.width(250.dp)) {
+                    HudPod(modifier = Modifier.weight(1.1f)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
@@ -379,7 +382,7 @@ fun VeloPulseCockpitScreen(
                     // ZONE C: Corner Live GPS Mini-Map + Grade
                     HudPod(
                         modifier = Modifier
-                            .width(235.dp)
+                            .weight(1f)
                             .clickable { onSetMapModalOpen(!state.isMapModalOpen) }
                     ) {
                         Row(
@@ -426,8 +429,7 @@ fun VeloPulseCockpitScreen(
                         Spacer(modifier = Modifier.height(5.dp))
 
                         MiniGpsRouteCanvas(
-                            routeId = state.activeRouteId,
-                            distanceMeters = state.distanceMeters,
+                            waypoints = state.activeRouteWaypoints,
                             lat = state.currentLat,
                             lon = state.currentLon
                         )
@@ -882,11 +884,12 @@ fun VeloPulseCockpitScreen(
             // BOTTOM PERIMETER ROW
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
-                HudPod {
+                HudPod(modifier = Modifier.weight(1f, fill = false)) {
                     Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -1076,12 +1079,11 @@ fun VeloPulseCockpitScreen(
 
 @Composable
 private fun MiniGpsRouteCanvas(
-    routeId: String,
-    distanceMeters: Float,
+    waypoints: List<GpsWaypoint>,
     lat: Double,
     lon: Double
 ) {
-    val route = remember(routeId) { GpsRouteEngine.getPresetById(routeId) }
+    val pts = waypoints.ifEmpty { GpsRouteEngine.presetRoutes.first().waypoints }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1091,7 +1093,6 @@ private fun MiniGpsRouteCanvas(
             .border(1.dp, BorderZinc, RoundedCornerShape(8.dp))
     ) {
         Canvas(modifier = Modifier.fillMaxSize().padding(6.dp)) {
-            val pts = route.waypoints
             if (pts.size >= 2) {
                 val minLat = pts.minOf { it.lat }
                 val maxLat = pts.maxOf { it.lat }

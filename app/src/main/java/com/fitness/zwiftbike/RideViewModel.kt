@@ -51,6 +51,7 @@ data class RideUiState(
     val activeRouteName: String = "Alpe d'Huez Climb",
     val activeRouteRegion: String = "French Alps, FR",
     val activeRoutePolylineJson: String = "[]",
+    val activeRouteWaypoints: List<GpsWaypoint> = emptyList(),
     val currentLat: Double = 45.0592,
     val currentLon: Double = 6.0358,
     val currentEleMeters: Double = 724.0,
@@ -62,7 +63,7 @@ data class RideUiState(
     val isMapModalOpen: Boolean = false,
     val isStravaModalOpen: Boolean = false,
     val isUpdateModalOpen: Boolean = false,
-    val installedVersionName: String = "v1.2.0",
+    val installedVersionName: String = "v1.2.1",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
@@ -89,9 +90,11 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             activeRouteName = activeRoute.name,
             activeRouteRegion = activeRoute.region,
             activeRoutePolylineJson = activeRoute.toCompactJsonArray(),
+            activeRouteWaypoints = activeRoute.waypoints,
             currentLat = activeRoute.waypoints.first().lat,
             currentLon = activeRoute.waypoints.first().lon,
-            currentEleMeters = activeRoute.waypoints.first().ele
+            currentEleMeters = activeRoute.waypoints.first().ele,
+            installedVersionName = resolveInstalledVersion(application)
         )
     )
     val uiState: StateFlow<RideUiState> = _uiState.asStateFlow()
@@ -104,6 +107,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
 
     @Volatile
     private var watchBpm: Int = 0
+
+    @Volatile
+    private var manualSensorModeOverride: Boolean = false
 
     private var elapsedAccumulatorSec: Float = 0f
 
@@ -123,9 +129,17 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         if (current.connectionState != ConnectionState.DEMO_MODE) {
             _uiState.value = current.copy(
                 connectionState = ConnectionState.LIVE_WATCH,
-                sensorMode = packet.mode
+                sensorMode = if (manualSensorModeOverride) current.sensorMode else packet.mode
             )
         }
+    }
+
+    private fun resolveInstalledVersion(app: Application): String {
+        return runCatching {
+            val info = app.packageManager.getPackageInfo(app.packageName, 0)
+            val vName = info.versionName ?: "1.2.1"
+            if (vName.startsWith("v")) vName else "v$vName"
+        }.getOrDefault("v1.2.1")
     }
 
     init {
@@ -331,6 +345,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             activeRouteName = route.name,
             activeRouteRegion = route.region,
             activeRoutePolylineJson = route.toCompactJsonArray(),
+            activeRouteWaypoints = route.waypoints,
             currentLat = firstWp.lat,
             currentLon = firstWp.lon,
             currentEleMeters = firstWp.ele,
@@ -542,6 +557,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleSensorMode() {
+        manualSensorModeOverride = true
         val next = if (_uiState.value.sensorMode == "ANKLE") "WRIST" else "ANKLE"
         _uiState.value = _uiState.value.copy(sensorMode = next)
     }
