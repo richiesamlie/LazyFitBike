@@ -34,7 +34,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v1.1.${{ github.run_number }}"
+          TAG="v1.2.${{ github.run_number }}"
           gh release create "$TAG" LazyFitBike-phone.apk LazyFitBike-watch.apk \
             --title "LazyFitBike $TAG (Phone + Galaxy Watch 4)" \
             --notes "Automated OTA build from commit ${{ github.sha }} signed with shared project keystore." \

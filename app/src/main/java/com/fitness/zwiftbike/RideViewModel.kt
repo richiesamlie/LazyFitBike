@@ -62,7 +62,7 @@ data class RideUiState(
     val isMapModalOpen: Boolean = false,
     val isStravaModalOpen: Boolean = false,
     val isUpdateModalOpen: Boolean = false,
-    val installedVersionName: String = "v1.1.0",
+    val installedVersionName: String = "v1.2.0",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
