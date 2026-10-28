@@ -502,6 +502,51 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun shareWatchUpdateApk(context: Context) {
+        viewModelScope.launch {
+            val cached = java.io.File(java.io.File(context.cacheDir, "updates"), "LazyFitBike-watch.apk")
+            if (cached.exists() && cached.length() > 0L) {
+                val localUrl = GithubUpdater.startLocalWatchApkServer(cached)
+                val msg = GithubUpdater.shareWatchApkFile(context, cached)
+                _uiState.value = _uiState.value.copy(
+                    updateStatusMessage = "$msg Local Watch Wi-Fi URL: $localUrl"
+                )
+                return@launch
+            }
+            var watchUrl = _uiState.value.latestWatchApkUrl
+            if (watchUrl.isNullOrEmpty()) {
+                val info = GithubUpdater.fetchLatestRelease()
+                watchUrl = info?.watchApkUrl
+            }
+            if (watchUrl.isNullOrEmpty()) {
+                _uiState.value = _uiState.value.copy(
+                    updateStatusMessage = "Tap Check GitHub first to locate LazyFitBike-watch.apk."
+                )
+                return@launch
+            }
+            _uiState.value = _uiState.value.copy(
+                updateDownloadProgress = 0,
+                updateStatusMessage = "Downloading LazyFitBike-watch.apk for Share & Wi-Fi Server..."
+            )
+            val file = GithubUpdater.downloadApkToFile(
+                context = context,
+                apkUrl = watchUrl,
+                targetFileName = "LazyFitBike-watch.apk",
+                onProgress = { pct ->
+                    _uiState.value = _uiState.value.copy(updateDownloadProgress = pct)
+                }
+            )
+            if (file != null) {
+                val localUrl = GithubUpdater.startLocalWatchApkServer(file)
+                val msg = GithubUpdater.shareWatchApkFile(context, file)
+                _uiState.value = _uiState.value.copy(
+                    updateDownloadProgress = 100,
+                    updateStatusMessage = "$msg Local Watch Wi-Fi URL: $localUrl"
+                )
+            }
+        }
+    }
+
     fun exportAndShareStravaGpx(context: Context) {
         val snapshot = ensureNonEmptyTrackPoints()
         runCatching {

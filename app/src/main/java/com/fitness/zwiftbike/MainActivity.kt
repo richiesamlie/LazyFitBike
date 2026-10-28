@@ -107,6 +107,7 @@ class MainActivity : ComponentActivity() {
                 onCheckGithubUpdates = rideViewModel::checkGithubUpdates,
                 onDownloadPhoneUpdate = { rideViewModel.downloadAndInstallPhoneUpdate(context) },
                 onRelayWatchUpdate = { rideViewModel.downloadAndRelayWatchUpdate(context) },
+                onShareWatchApk = { rideViewModel.shareWatchUpdateApk(context) },
                 onExportStravaGpx = { rideViewModel.exportAndShareStravaGpx(context) },
                 onUploadDirectToStrava = rideViewModel::uploadDirectToStrava
             )
@@ -153,6 +154,7 @@ fun VeloPulseCockpitScreen(
     onCheckGithubUpdates: () -> Unit,
     onDownloadPhoneUpdate: () -> Unit,
     onRelayWatchUpdate: () -> Unit,
+    onShareWatchApk: () -> Unit,
     onExportStravaGpx: () -> Unit,
     onUploadDirectToStrava: (String) -> Unit
 ) {
@@ -872,7 +874,27 @@ fun VeloPulseCockpitScreen(
                             )
                         ) {
                             Text(
-                                text = "Download & Push Watch APK via Bluetooth",
+                                text = "Download & Push Watch APK (BT + Local Wi-Fi Server)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Button(
+                            onClick = onShareWatchApk,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = BgControlDark,
+                                contentColor = AccentOrange
+                            )
+                        ) {
+                            Text(
+                                text = "Share Watch APK (Wear Installer 2 / Bugjaeger / Files)",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
