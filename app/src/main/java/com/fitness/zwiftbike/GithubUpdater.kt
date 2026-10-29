@@ -32,7 +32,7 @@ data class GithubReleaseInfo(
 object GithubUpdater {
 
     const val GITHUB_REPO = "richiesamlie/LazyFitBike"
-    const val WATCH_APK_CHANNEL_PATH = "/velopulse/watch_apk_update"
+    const val WATCH_APK_CHANNEL_PATH = "/lazyfitbike/watch_apk_update"
 
     private val tagRegex = Regex(""""tag_name"\s*:\s*"([^"]+)"""")
     private val nameRegex = Regex(""""name"\s*:\s*"([^"]+)"""")
@@ -230,6 +230,7 @@ object GithubUpdater {
                 // Wake up WearOtaListenerService on the watch first
                 runCatching {
                     withTimeoutOrNull(3000L) {
+                        messageClient.sendMessage(node.id, "/lazyfitbike/ping", "ota".toByteArray(Charsets.UTF_8)).await()
                         messageClient.sendMessage(node.id, "/velopulse/ping", "ota".toByteArray(Charsets.UTF_8)).await()
                     }
                 }

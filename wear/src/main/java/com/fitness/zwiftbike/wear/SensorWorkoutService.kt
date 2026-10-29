@@ -60,7 +60,7 @@ class SensorWorkoutService : Service(), SensorEventListener {
     private var simTick: Double = 0.0
 
     companion object {
-        private const val CHANNEL_ID = "velopulse_watch_workout"
+        private const val CHANNEL_ID = "lazyfitbike_watch_workout"
         private const val NOTIFICATION_ID = 1001
 
         const val ACTION_START = "com.fitness.zwiftbike.wear.ACTION_START"
@@ -79,7 +79,9 @@ class SensorWorkoutService : Service(), SensorEventListener {
 
     override fun onCreate() {
         super.onCreate()
-        val prefs = getSharedPreferences("velopulse_watch_prefs", Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("lazyfitbike_watch_prefs", Context.MODE_PRIVATE).let {
+            if (!it.contains("maxHr")) getSharedPreferences("velopulse_watch_prefs", Context.MODE_PRIVATE) else it
+        }
         val savedMaxHr = prefs.getInt("maxHr", 190).coerceIn(130, 230)
         _state.value = _state.value.copy(maxHr = savedMaxHr)
 
@@ -126,7 +128,7 @@ class SensorWorkoutService : Service(), SensorEventListener {
             }
             ACTION_SET_MAX_HR -> {
                 val nextMaxHr = (intent.getIntExtra(EXTRA_MAX_HR, 190)).coerceIn(130, 230)
-                getSharedPreferences("velopulse_watch_prefs", Context.MODE_PRIVATE)
+                getSharedPreferences("lazyfitbike_watch_prefs", Context.MODE_PRIVATE)
                     .edit()
                     .putInt("maxHr", nextMaxHr)
                     .apply()
@@ -164,7 +166,7 @@ class SensorWorkoutService : Service(), SensorEventListener {
         }
         createNotificationChannel()
         val notification = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("VeloPulse Sensor Active")
+            .setContentTitle("LazyFitBike Sensor Active")
             .setContentText("Streaming cadence and heart rate to phone")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
@@ -294,7 +296,7 @@ class SensorWorkoutService : Service(), SensorEventListener {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
-            "VeloPulse::WatchSensorWakeLock"
+            "LazyFitBike::WatchSensorWakeLock"
         ).apply {
             acquire(2 * 60 * 60 * 1000L) // 2 hours max safety timeout
         }
@@ -313,7 +315,7 @@ class SensorWorkoutService : Service(), SensorEventListener {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "VeloPulse Watch Sensor",
+            "LazyFitBike Watch Sensor",
             NotificationManager.IMPORTANCE_LOW
         )
         manager.createNotificationChannel(channel)

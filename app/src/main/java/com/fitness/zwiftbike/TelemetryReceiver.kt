@@ -23,7 +23,7 @@ data class WatchTelemetryPacket(
 
 /**
  * Listens for live Galaxy Watch 4 packets via both:
- * 1. Google Play Services Wearable MessageClient ("/velopulse/telemetry")
+ * 1. Google Play Services Wearable MessageClient ("/lazyfitbike/telemetry")
  * 2. Local UDP socket on port 45454
  */
 class TelemetryReceiver(
@@ -37,7 +37,8 @@ class TelemetryReceiver(
     private var udpSocket: DatagramSocket? = null
 
     companion object {
-        const val TELEMETRY_PATH = "/velopulse/telemetry"
+        const val TELEMETRY_PATH = "/lazyfitbike/telemetry"
+        const val LEGACY_TELEMETRY_PATH = "/velopulse/telemetry"
         const val UDP_PORT = 45454
 
         fun parsePayload(raw: String): WatchTelemetryPacket? {
@@ -73,7 +74,7 @@ class TelemetryReceiver(
     }
 
     override fun onMessageReceived(event: MessageEvent) {
-        if (event.path == TELEMETRY_PATH) {
+        if (event.path == TELEMETRY_PATH || event.path == LEGACY_TELEMETRY_PATH) {
             val text = String(event.data, Charsets.UTF_8)
             parsePayload(text)?.let(onPacket)
         }

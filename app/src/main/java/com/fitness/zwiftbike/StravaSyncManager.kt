@@ -50,12 +50,12 @@ object StravaSyncManager {
         routeName: String,
         trackPoints: List<RecordedTrackPoint>
     ): String {
-        val safeTitle = escapeXml("VeloPulse Ride: $routeName")
+        val safeTitle = escapeXml("LazyFitBike Ride: $routeName")
         val startTimeMs = trackPoints.firstOrNull()?.timestampEpochMs ?: System.currentTimeMillis()
         val sb = StringBuilder(4096)
 
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-        sb.append("<gpx version=\"1.1\" creator=\"VeloPulse Indoor Cycling with Barometer\"\n")
+        sb.append("<gpx version=\"1.1\" creator=\"LazyFitBike Indoor Cycling with Barometer\"\n")
         sb.append("  xmlns=\"http://www.topografix.com/GPX/1/1\"\n")
         sb.append("  xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n")
         sb.append("  xmlns:gpxtpx=\"http://www.garmin.com/xmlschemas/TrackPointExtension/v1\">\n")
@@ -108,7 +108,7 @@ object StravaSyncManager {
     ): File {
         val gpxXml = buildStravaGpxXml(routeName, trackPoints)
         val ridesDir = File(context.cacheDir, "rides").apply { mkdirs() }
-        val fileName = "velopulse_strava_${System.currentTimeMillis()}.gpx"
+        val fileName = "lazyfitbike_strava_${System.currentTimeMillis()}.gpx"
         val gpxFile = File(ridesDir, fileName)
         gpxFile.writeText(gpxXml, Charsets.UTF_8)
 
@@ -121,7 +121,7 @@ object StravaSyncManager {
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "application/gpx+xml"
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, "VeloPulse Ride: $routeName")
+            putExtra(Intent.EXTRA_SUBJECT, "LazyFitBike Ride: $routeName")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         val chooser = Intent.createChooser(shareIntent, "Share GPX Ride to Strava").apply {
@@ -149,7 +149,7 @@ object StravaSyncManager {
         }
 
         val gpxBytes = buildStravaGpxXml(routeName, trackPoints).toByteArray(Charsets.UTF_8)
-        val boundary = "----VeloPulseStravaBoundary${System.currentTimeMillis()}"
+        val boundary = "----LazyFitBikeStravaBoundary${System.currentTimeMillis()}"
         val lineEnd = "\r\n"
 
         runCatching {
@@ -175,11 +175,11 @@ object StravaSyncManager {
                 writeFormField("data_type", "gpx")
                 writeFormField("activity_type", "ride")
                 writeFormField("trainer", "0")
-                writeFormField("name", "VeloPulse: $routeName")
-                writeFormField("description", "Static bike ride recorded via VeloPulse + Samsung Galaxy Watch 4")
+                writeFormField("name", "LazyFitBike: $routeName")
+                writeFormField("description", "Static bike ride recorded via LazyFitBike + Samsung Galaxy Watch 4")
 
                 out.writeBytes("--$boundary$lineEnd")
-                out.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"velopulse_ride.gpx\"$lineEnd")
+                out.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"lazyfitbike_ride.gpx\"$lineEnd")
                 out.writeBytes("Content-Type: application/gpx+xml$lineEnd$lineEnd")
                 out.write(gpxBytes)
                 out.writeBytes(lineEnd)

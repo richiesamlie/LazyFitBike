@@ -57,7 +57,8 @@ class WatchInstallReceiver : BroadcastReceiver() {
 object WatchGithubUpdater {
 
     const val GITHUB_REPO = "richiesamlie/LazyFitBike"
-    const val WATCH_APK_CHANNEL_PATH = "/velopulse/watch_apk_update"
+    const val WATCH_APK_CHANNEL_PATH = "/lazyfitbike/watch_apk_update"
+    const val LEGACY_WATCH_APK_CHANNEL_PATH = "/velopulse/watch_apk_update"
 
     val statusFlow = MutableStateFlow("OTA Update")
 

@@ -75,7 +75,7 @@ data class RideUiState(
     val riderAge: Int = 30,
     val powerZone: Int = 1,
     val hrZone: Int = 1,
-    val installedVersionName: String = "v1.3.6",
+    val installedVersionName: String = "v1.3.7",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
@@ -146,13 +146,15 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     private fun resolveInstalledVersion(app: Application): String {
         return runCatching {
             val info = app.packageManager.getPackageInfo(app.packageName, 0)
-            val vName = info.versionName ?: "1.3.6"
+            val vName = info.versionName ?: "1.3.7"
             if (vName.startsWith("v")) vName else "v$vName"
-        }.getOrDefault("v1.3.6")
+        }.getOrDefault("v1.3.7")
     }
 
     private fun loadSavedProfile(app: Application) {
-        val prefs = app.getSharedPreferences("velopulse_rider_profile", Context.MODE_PRIVATE)
+        val prefs = app.getSharedPreferences("lazyfitbike_rider_profile", Context.MODE_PRIVATE).let {
+            if (!it.contains("riderWeightKg")) app.getSharedPreferences("velopulse_rider_profile", Context.MODE_PRIVATE) else it
+        }
         val weight = prefs.getFloat("riderWeightKg", 70f).coerceIn(35f, 180f)
         val bikeWeight = prefs.getFloat("bikeWeightKg", 9f).coerceIn(5f, 25f)
         val ftp = prefs.getInt("ftpWatts", 220).coerceIn(60, 550)
@@ -464,7 +466,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         val prefs = getApplication<Application>()
-            .getSharedPreferences("velopulse_rider_profile", Context.MODE_PRIVATE)
+            .getSharedPreferences("lazyfitbike_rider_profile", Context.MODE_PRIVATE)
         prefs.edit()
             .putFloat("riderWeightKg", safeWeight)
             .putFloat("bikeWeightKg", safeBike)
@@ -492,6 +494,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                 val nodes = nodeClient.connectedNodes.await()
                 val payload = "SET_MAX_HR:$safeMaxHr".toByteArray(Charsets.UTF_8)
                 for (node in nodes) {
+                    messageClient.sendMessage(node.id, "/lazyfitbike/control", payload).await()
                     messageClient.sendMessage(node.id, "/velopulse/control", payload).await()
                 }
             }
@@ -732,6 +735,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                 val nodes = nodeClient.connectedNodes.await()
                 val payload = "SET_MODE:$next".toByteArray(Charsets.UTF_8)
                 for (node in nodes) {
+                    messageClient.sendMessage(node.id, "/lazyfitbike/control", payload).await()
                     messageClient.sendMessage(node.id, "/velopulse/control", payload).await()
                 }
             }

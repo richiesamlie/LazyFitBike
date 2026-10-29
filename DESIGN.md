@@ -1,4 +1,4 @@
-# DESIGN.md: VeloPulse Indoor Cycling Cockpit
+# DESIGN.md: LazyFitBike Indoor Cycling Cockpit
 
 ## Identity & Design Read
 Reading this as: real-time 3D sports telemetry HUD and Wear OS sensor companion for indoor cyclists, in a high-contrast performance cockpit style, dial `ENERGY 2 / RHYTHM 2 / MOTION 2`.

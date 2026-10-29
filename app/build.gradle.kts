@@ -11,8 +11,8 @@ android {
         applicationId = "com.fitness.zwiftbike"
         minSdk = 26
         targetSdk = 36
-        versionCode = 16
-        versionName = "1.3.6"
+        versionCode = 17
+        versionName = "1.3.7"
     }
 
     val keystoreFile = file(System.getenv("KEYSTORE_FILE") ?: "../keystore/lazyfitbike.jks")

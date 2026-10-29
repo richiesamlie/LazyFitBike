@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            VeloPulseCockpitScreen(
+            LazyFitBikeCockpitScreen(
                 state = state,
                 onToggleSensorMode = rideViewModel::toggleSensorMode,
                 onChangeGear = rideViewModel::changeGear,
@@ -297,7 +297,7 @@ private fun pushRideStateToWebView(view: WebView?, state: RideUiState) {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun VeloPulseCockpitScreen(
+fun LazyFitBikeCockpitScreen(
     state: RideUiState,
     onToggleSensorMode: () -> Unit,
     onChangeGear: (Int) -> Unit,

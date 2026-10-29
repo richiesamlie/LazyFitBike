@@ -15,7 +15,7 @@ import java.util.Locale
 
 /**
  * Transmits live Galaxy Watch 4 telemetry over both:
- * 1. Google Play Services Wearable MessageClient ("/velopulse/telemetry")
+ * 1. Google Play Services Wearable MessageClient ("/lazyfitbike/telemetry")
  * 2. Local Wi-Fi UDP broadcast fallback on port 45454
  */
 class TelemetrySender(context: Context) {
@@ -27,7 +27,8 @@ class TelemetrySender(context: Context) {
     val connectedNodeCount: StateFlow<Int> = _connectedNodeCount.asStateFlow()
 
     companion object {
-        const val TELEMETRY_PATH = "/velopulse/telemetry"
+        const val TELEMETRY_PATH = "/lazyfitbike/telemetry"
+        const val LEGACY_TELEMETRY_PATH = "/velopulse/telemetry"
         const val UDP_PORT = 45454
     }
 
@@ -43,6 +44,7 @@ class TelemetrySender(context: Context) {
                 _connectedNodeCount.value = nodes.size
                 for (node in nodes) {
                     messageClient.sendMessage(node.id, TELEMETRY_PATH, payloadBytes).await()
+                    messageClient.sendMessage(node.id, LEGACY_TELEMETRY_PATH, payloadBytes).await()
                 }
             }.onFailure {
                 _connectedNodeCount.value = 0

@@ -279,7 +279,7 @@ object GpsRouteEngine {
                 requestMethod = "GET"
                 connectTimeout = 6000
                 readTimeout = 6000
-                setRequestProperty("User-Agent", "VeloPulse-Android/2.0")
+                setRequestProperty("User-Agent", "LazyFitBike-Android/1.3.6")
             }
             if (conn.responseCode !in 200..299) return@withContext null
             val responseText = conn.inputStream.bufferedReader().use { it.readText() }
