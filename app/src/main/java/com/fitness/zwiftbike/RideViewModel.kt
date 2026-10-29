@@ -63,7 +63,7 @@ data class RideUiState(
     val isMapModalOpen: Boolean = false,
     val isStravaModalOpen: Boolean = false,
     val isUpdateModalOpen: Boolean = false,
-    val installedVersionName: String = "v1.3.3",
+    val installedVersionName: String = "v1.3.4",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
@@ -137,9 +137,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     private fun resolveInstalledVersion(app: Application): String {
         return runCatching {
             val info = app.packageManager.getPackageInfo(app.packageName, 0)
-            val vName = info.versionName ?: "1.3.3"
+            val vName = info.versionName ?: "1.3.4"
             if (vName.startsWith("v")) vName else "v$vName"
-        }.getOrDefault("v1.3.3")
+        }.getOrDefault("v1.3.4")
     }
 
     init {

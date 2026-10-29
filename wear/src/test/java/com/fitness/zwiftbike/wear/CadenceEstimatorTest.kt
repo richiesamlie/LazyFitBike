@@ -51,4 +51,16 @@ class CadenceEstimatorTest {
         val currentRpm = estimator.getCurrentRpm(ts + 80_000_000L) // 80ms later
         assertTrue("Expected RPM > 80, got $currentRpm", currentRpm > 80f)
     }
+
+    @Test
+    fun casualWristTiltsBelowDeadbandAreSuppressedToZeroRpm() {
+        val estimator = CadenceEstimator()
+        var ts = 10_000_000_000L
+        // Tilting wrist at 0.5 rad/s (below 0.75 rad/s deadband)
+        repeat(15) {
+            val rpm = estimator.onGyroSample(0.5f, 0.1f, 0.05f, ts)
+            assertEquals("Expected casual wrist movement to yield 0 RPM, got $rpm", 0f, rpm, 0.01f)
+            ts += 50_000_000L
+        }
+    }
 }

@@ -88,27 +88,26 @@ class MainActivity : ComponentActivity() {
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ -> }
+    ) { _ ->
+        if (HeartRateTrackerManager.hasHeartRatePermission(this)) {
+            sendServiceAction(SensorWorkoutService.ACTION_REFRESH_SENSORS)
+        }
+    }
+
+    private fun checkAndRequestPermissions() {
+        val missing = HeartRateTrackerManager.requiredRuntimePermissions().filter { perm ->
+            ContextCompat.checkSelfPermission(this, perm) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) {
+            permissionLauncher.launch(missing.toTypedArray())
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        val neededPermissions = mutableListOf<String>()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BODY_SENSORS)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            neededPermissions.add(Manifest.permission.BODY_SENSORS)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            neededPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        if (neededPermissions.isNotEmpty()) {
-            permissionLauncher.launch(neededPermissions.toTypedArray())
-        }
+        checkAndRequestPermissions()
 
         runCatching {
             Wearable.getChannelClient(this).registerChannelCallback(channelCallback)
@@ -125,6 +124,9 @@ class MainActivity : ComponentActivity() {
                 updateStatus = updateStatus,
                 onToggleMode = { sendServiceAction(SensorWorkoutService.ACTION_TOGGLE_MODE) },
                 onToggleActive = {
+                    if (!workoutState.isActive && !HeartRateTrackerManager.hasHeartRatePermission(this)) {
+                        checkAndRequestPermissions()
+                    }
                     val action = if (workoutState.isActive) {
                         SensorWorkoutService.ACTION_STOP
                     } else {
@@ -133,6 +135,7 @@ class MainActivity : ComponentActivity() {
                     sendServiceAction(action)
                 },
                 onToggleSim = { sendServiceAction(SensorWorkoutService.ACTION_TOGGLE_SIM) },
+                onRequestPermissions = { checkAndRequestPermissions() },
                 onTriggerGithubUpdate = { triggerWatchOtaUpdate() }
             )
         }
@@ -197,6 +200,7 @@ fun WatchSensorScreen(
     onToggleMode: () -> Unit,
     onToggleActive: () -> Unit,
     onToggleSim: () -> Unit,
+    onRequestPermissions: () -> Unit,
     onTriggerGithubUpdate: () -> Unit
 ) {
     Box(
@@ -251,12 +255,23 @@ fun WatchSensorScreen(
                 val primaryValue = if (state.mode == "ANKLE") {
                     state.rpm.roundToInt().toString()
                 } else {
-                    if (state.bpm > 0) state.bpm.toString() else "0"
+                    when {
+                        state.bpm > 0 -> state.bpm.toString()
+                        state.hrStatus == "NO PERM" -> "PERM"
+                        state.isActive -> "..."
+                        else -> "0"
+                    }
                 }
                 val primaryUnit = if (state.mode == "ANKLE") {
                     "RPM CADENCE"
                 } else {
-                    "HEART RATE (BPM)"
+                    when {
+                        state.bpm > 0 -> "HEART RATE (BPM)"
+                        state.hrStatus == "NO PERM" -> "TAP HR PILL TO ALLOW"
+                        state.hrStatus == "OFF WRIST" -> "WEAR WATCH SNUGLY"
+                        state.isActive -> "MEASURING PULSE..."
+                        else -> "HEART RATE (BPM)"
+                    }
                 }
 
                 Text(
@@ -285,13 +300,19 @@ fun WatchSensorScreen(
                             .clip(RoundedCornerShape(8.dp))
                             .background(SurfaceZinc)
                             .border(1.dp, BorderZinc, RoundedCornerShape(8.dp))
+                            .clickable { onRequestPermissions() }
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         val secondaryLabel = if (state.mode == "ANKLE") {
-                            val hrDisplay = if (state.bpm > 0) "${state.bpm} BPM" else "HR"
+                            val hrDisplay = when {
+                                state.bpm > 0 -> "${state.bpm} BPM"
+                                state.hrStatus == "NO PERM" -> "ALLOW"
+                                state.isActive -> "WAIT.."
+                                else -> "0 BPM"
+                            }
                             "HR: $hrDisplay"
                         } else {
-                            "${state.rpm.roundToInt()} RPM"
+                            if (state.bpm > 0) "PPG LOCKED" else state.hrStatus
                         }
                         Text(
                             text = secondaryLabel,

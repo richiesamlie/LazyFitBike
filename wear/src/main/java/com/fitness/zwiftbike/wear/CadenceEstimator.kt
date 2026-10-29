@@ -17,7 +17,8 @@ class CadenceEstimator {
     companion object {
         private const val WINDOW_NS = 3_000_000_000L // 3.0 seconds rolling window
         private const val TIMEOUT_NS = 2_500_000_000L // 2.5 seconds inactivity timeout
-        private const val DEADBAND_RAD_PER_SEC = 0.45f
+        private const val DEADBAND_RAD_PER_SEC = 0.75f
+        private const val MIN_ACTIVE_SAMPLES = 4
         private const val ANKLE_ARTICULATION_FACTOR = 0.85f
         private const val EMA_ALPHA = 0.25f
     }
@@ -38,7 +39,7 @@ class CadenceEstimator {
             samples.removeFirst()
         }
 
-        if (samples.size < 4) {
+        if (samples.size < MIN_ACTIVE_SAMPLES) {
             return smoothedRpm
         }
 
@@ -46,17 +47,21 @@ class CadenceEstimator {
         val recentCutoffNs = timestampNs - 1_500_000_000L
         var recentSum = 0f
         var recentCount = 0
+        var activeAboveDeadband = 0
         var totalSum = 0f
         for (s in samples) {
             totalSum += s.omegaMag
             if (s.timestampNs >= recentCutoffNs) {
                 recentSum += s.omegaMag
                 recentCount++
+                if (s.omegaMag >= DEADBAND_RAD_PER_SEC) {
+                    activeAboveDeadband++
+                }
             }
         }
 
         val recentMeanOmega = if (recentCount > 0) recentSum / recentCount else 0f
-        if (recentMeanOmega < DEADBAND_RAD_PER_SEC) {
+        if (recentMeanOmega < DEADBAND_RAD_PER_SEC || activeAboveDeadband < 2) {
             smoothedRpm = 0f
             return 0f
         }

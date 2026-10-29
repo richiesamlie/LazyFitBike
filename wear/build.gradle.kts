@@ -9,10 +9,10 @@ android {
     compileSdk = 36
     defaultConfig {
         applicationId = "com.fitness.zwiftbike"
-        minSdk = 26
+        minSdk = 30
         targetSdk = 36
-        versionCode = 13
-        versionName = "1.3.3"
+        versionCode = 14
+        versionName = "1.3.4"
     }
 
     val keystoreFile = file(System.getenv("KEYSTORE_FILE") ?: "../keystore/lazyfitbike.jks")
@@ -88,6 +88,9 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
+    implementation(files("libs/samsung-health-sensor-api.aar"))
+    implementation("androidx.health:health-services-client:1.1.0")
+    implementation("com.google.guava:guava:32.1.3-android")
     implementation("com.google.android.gms:play-services-wearable:18.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")

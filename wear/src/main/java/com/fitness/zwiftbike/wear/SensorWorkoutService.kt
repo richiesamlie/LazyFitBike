@@ -35,6 +35,7 @@ data class WatchWorkoutState(
     val isSimulated: Boolean = false,
     val rpm: Float = 0f,
     val bpm: Int = 0,
+    val hrStatus: String = "IDLE", // "IDLE", "NO PERM", "MEASURING", "OFF WRIST", or "LOCKED"
     val connectedNodes: Int = 0
 )
 
@@ -49,9 +50,11 @@ class SensorWorkoutService : Service(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
     private lateinit var telemetrySender: TelemetrySender
+    private lateinit var hrTrackerManager: HeartRateTrackerManager
     private val cadenceEstimator = CadenceEstimator()
     private var wakeLock: PowerManager.WakeLock? = null
 
+    @Volatile
     private var latestHeartRateBpm: Int = 0
     private var simTick: Double = 0.0
 
@@ -63,6 +66,7 @@ class SensorWorkoutService : Service(), SensorEventListener {
         const val ACTION_STOP = "com.fitness.zwiftbike.wear.ACTION_STOP"
         const val ACTION_TOGGLE_MODE = "com.fitness.zwiftbike.wear.ACTION_TOGGLE_MODE"
         const val ACTION_TOGGLE_SIM = "com.fitness.zwiftbike.wear.ACTION_TOGGLE_SIM"
+        const val ACTION_REFRESH_SENSORS = "com.fitness.zwiftbike.wear.ACTION_REFRESH_SENSORS"
 
         private val _state = MutableStateFlow(WatchWorkoutState())
         val state: StateFlow<WatchWorkoutState> = _state.asStateFlow()
@@ -72,6 +76,18 @@ class SensorWorkoutService : Service(), SensorEventListener {
         super.onCreate()
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         telemetrySender = TelemetrySender(this)
+        hrTrackerManager = HeartRateTrackerManager(
+            context = this,
+            onBpmDetected = { bpm, _ ->
+                latestHeartRateBpm = bpm
+                _state.value = _state.value.copy(bpm = bpm, hrStatus = "LOCKED")
+            },
+            onStatusUpdate = { status ->
+                if (latestHeartRateBpm == 0 || status == "NO PERM" || status == "OFF WRIST") {
+                    _state.value = _state.value.copy(hrStatus = status)
+                }
+            }
+        )
 
         serviceScope.launch {
             telemetrySender.connectedNodeCount.collect { count ->
@@ -84,10 +100,18 @@ class SensorWorkoutService : Service(), SensorEventListener {
         when (intent?.action) {
             ACTION_START -> startWorkout()
             ACTION_STOP -> stopWorkout()
+            ACTION_REFRESH_SENSORS -> {
+                if (_state.value.isActive) {
+                    registerSensors()
+                }
+            }
             ACTION_TOGGLE_MODE -> {
                 val nextMode = if (_state.value.mode == "ANKLE") "WRIST" else "ANKLE"
                 cadenceEstimator.reset()
-                _state.value = _state.value.copy(mode = nextMode)
+                _state.value = _state.value.copy(
+                    mode = nextMode,
+                    rpm = if (nextMode == "WRIST" && !_state.value.isSimulated) 0f else _state.value.rpm
+                )
             }
             ACTION_TOGGLE_SIM -> {
                 val nextSim = !_state.value.isSimulated
@@ -98,7 +122,10 @@ class SensorWorkoutService : Service(), SensorEventListener {
     }
 
     private fun startWorkout() {
-        if (_state.value.isActive) return
+        if (_state.value.isActive) {
+            registerSensors()
+            return
+        }
         createNotificationChannel()
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("VeloPulse Sensor Active")
@@ -140,11 +167,23 @@ class SensorWorkoutService : Service(), SensorEventListener {
                     liveRpm = (86.0 + 6.0 * sin(simTick * 0.5)).toFloat()
                     liveBpm = (144.0 + 5.0 * sin(simTick * 0.25)).roundToInt()
                 } else {
-                    liveRpm = cadenceEstimator.getCurrentRpm(nowNs)
+                    // Only compute gyroscope RPM in ANKLE mode; in WRIST mode keep RPM at 0f
+                    liveRpm = if (current.mode == "ANKLE") {
+                        cadenceEstimator.getCurrentRpm(nowNs)
+                    } else {
+                        0f
+                    }
                     liveBpm = latestHeartRateBpm
                 }
 
-                _state.value = current.copy(rpm = liveRpm, bpm = liveBpm)
+                val nextHrStatus = when {
+                    current.isSimulated -> "SIM"
+                    !HeartRateTrackerManager.hasHeartRatePermission(this@SensorWorkoutService) -> "NO PERM"
+                    liveBpm > 0 -> "LOCKED"
+                    else -> if (current.hrStatus == "OFF WRIST") "OFF WRIST" else "MEASURING"
+                }
+
+                _state.value = current.copy(rpm = liveRpm, bpm = liveBpm, hrStatus = nextHrStatus)
                 telemetrySender.sendTelemetry(
                     mode = current.mode,
                     rpm = liveRpm,
@@ -161,7 +200,7 @@ class SensorWorkoutService : Service(), SensorEventListener {
         unregisterSensors()
         releaseWakeLock()
         cadenceEstimator.reset()
-        _state.value = _state.value.copy(isActive = false, rpm = 0f)
+        _state.value = _state.value.copy(isActive = false, rpm = 0f, hrStatus = "IDLE")
         runCatching {
             stopForeground(STOP_FOREGROUND_REMOVE)
         }
@@ -169,6 +208,7 @@ class SensorWorkoutService : Service(), SensorEventListener {
     }
 
     private fun registerSensors() {
+        sensorManager.unregisterListener(this)
         val gyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
         if (gyro != null) {
             sensorManager.registerListener(this, gyro, SensorManager.SENSOR_DELAY_GAME)
@@ -179,14 +219,12 @@ class SensorWorkoutService : Service(), SensorEventListener {
                 sensorManager.registerListener(this, accel, SensorManager.SENSOR_DELAY_GAME)
             }
         }
-        val heartRate = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
-        if (heartRate != null) {
-            sensorManager.registerListener(this, heartRate, SensorManager.SENSOR_DELAY_NORMAL)
-        }
+        hrTrackerManager.start()
     }
 
     private fun unregisterSensors() {
         sensorManager.unregisterListener(this)
+        hrTrackerManager.stop()
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
@@ -194,23 +232,20 @@ class SensorWorkoutService : Service(), SensorEventListener {
         val nowRealtimeNs = SystemClock.elapsedRealtimeNanos()
         when (event.sensor.type) {
             Sensor.TYPE_GYROSCOPE -> {
-                val wx = event.values.getOrElse(0) { 0f }
-                val wy = event.values.getOrElse(1) { 0f }
-                val wz = event.values.getOrElse(2) { 0f }
-                // Use SystemClock.elapsedRealtimeNanos() so onGyroSample and getCurrentRpm share the same clock domain
-                cadenceEstimator.onGyroSample(wx, wy, wz, nowRealtimeNs)
+                if (_state.value.mode == "ANKLE") {
+                    val wx = event.values.getOrElse(0) { 0f }
+                    val wy = event.values.getOrElse(1) { 0f }
+                    val wz = event.values.getOrElse(2) { 0f }
+                    cadenceEstimator.onGyroSample(wx, wy, wz, nowRealtimeNs)
+                }
             }
             Sensor.TYPE_LINEAR_ACCELERATION, Sensor.TYPE_ACCELEROMETER -> {
-                val ax = event.values.getOrElse(0) { 0f }
-                val ay = event.values.getOrElse(1) { 0f }
-                val az = event.values.getOrElse(2) { 0f }
-                val dynMag = kotlin.math.abs(kotlin.math.sqrt(ax * ax + ay * ay + az * az) - 9.81f)
-                cadenceEstimator.onGyroSample(dynMag * 0.45f, 0f, 0f, nowRealtimeNs)
-            }
-            Sensor.TYPE_HEART_RATE -> {
-                val bpm = event.values.getOrElse(0) { 0f }.roundToInt()
-                if (bpm in 35..225) {
-                    latestHeartRateBpm = bpm
+                if (_state.value.mode == "ANKLE") {
+                    val ax = event.values.getOrElse(0) { 0f }
+                    val ay = event.values.getOrElse(1) { 0f }
+                    val az = event.values.getOrElse(2) { 0f }
+                    val dynMag = kotlin.math.abs(kotlin.math.sqrt(ax * ax + ay * ay + az * az) - 9.81f)
+                    cadenceEstimator.onGyroSample(dynMag * 0.45f, 0f, 0f, nowRealtimeNs)
                 }
             }
         }
