@@ -172,6 +172,12 @@ class SensorWorkoutService : Service(), SensorEventListener {
         val gyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
         if (gyro != null) {
             sensorManager.registerListener(this, gyro, SensorManager.SENSOR_DELAY_GAME)
+        } else {
+            val accel = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+                ?: sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+            if (accel != null) {
+                sensorManager.registerListener(this, accel, SensorManager.SENSOR_DELAY_GAME)
+            }
         }
         val heartRate = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
         if (heartRate != null) {
@@ -185,12 +191,21 @@ class SensorWorkoutService : Service(), SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent?) {
         event ?: return
+        val nowRealtimeNs = SystemClock.elapsedRealtimeNanos()
         when (event.sensor.type) {
             Sensor.TYPE_GYROSCOPE -> {
                 val wx = event.values.getOrElse(0) { 0f }
                 val wy = event.values.getOrElse(1) { 0f }
                 val wz = event.values.getOrElse(2) { 0f }
-                cadenceEstimator.onGyroSample(wx, wy, wz, event.timestamp)
+                // Use SystemClock.elapsedRealtimeNanos() so onGyroSample and getCurrentRpm share the same clock domain
+                cadenceEstimator.onGyroSample(wx, wy, wz, nowRealtimeNs)
+            }
+            Sensor.TYPE_LINEAR_ACCELERATION, Sensor.TYPE_ACCELEROMETER -> {
+                val ax = event.values.getOrElse(0) { 0f }
+                val ay = event.values.getOrElse(1) { 0f }
+                val az = event.values.getOrElse(2) { 0f }
+                val dynMag = kotlin.math.abs(kotlin.math.sqrt(ax * ax + ay * ay + az * az) - 9.81f)
+                cadenceEstimator.onGyroSample(dynMag * 0.45f, 0f, 0f, nowRealtimeNs)
             }
             Sensor.TYPE_HEART_RATE -> {
                 val bpm = event.values.getOrElse(0) { 0f }.roundToInt()

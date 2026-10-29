@@ -147,7 +147,7 @@ private class MapJsBridge(
 }
 
 private object OsmTileProxy {
-    private const val USER_AGENT = "LazyFitBike/1.3.2 (https://github.com/richiesamlie/LazyFitBike)"
+    private const val USER_AGENT = "LazyFitBike/1.3.3 (https://github.com/richiesamlie/LazyFitBike)"
     private const val REFERER = "https://github.com/richiesamlie/LazyFitBike"
     private val tileUrlRegex = Regex("""/(\d+)/(\d+)/(\d+)\.png""")
 
@@ -321,7 +321,7 @@ fun VeloPulseCockpitScreen(
                     )
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
-                    settings.userAgentString = "LazyFitBike/1.3.2 (https://github.com/richiesamlie/LazyFitBike)"
+                    settings.userAgentString = "LazyFitBike/1.3.3 (https://github.com/richiesamlie/LazyFitBike)"
                     addJavascriptInterface(MapJsBridge(onRequestOsrmRoute), "AndroidBridge")
                     webViewClient = object : WebViewClient() {
                         override fun shouldInterceptRequest(
@@ -1321,8 +1321,40 @@ private fun MiniGpsRouteCanvas(
                     style = Stroke(width = 4.5f, cap = StrokeCap.Round)
                 )
 
+                var closestIdx = 0
+                var minSq = Double.MAX_VALUE
+                pts.forEachIndexed { idx, wp ->
+                    val dLat = wp.lat - lat
+                    val dLon = wp.lon - lon
+                    val sq = dLat * dLat + dLon * dLon
+                    if (sq < minSq) {
+                        minSq = sq
+                        closestIdx = idx
+                    }
+                }
+
                 val rx = (pad + (((lon - minLon) / lonSpan) * innerW).toFloat()).coerceIn(pad, size.width - pad)
                 val ry = (pad + ((1.0 - (lat - minLat) / latSpan) * innerH).toFloat()).coerceIn(pad, size.height - pad)
+
+                val completedPath = Path()
+                for (i in 0..closestIdx) {
+                    val wp = pts[i]
+                    val x = pad + (((wp.lon - minLon) / lonSpan) * innerW).toFloat()
+                    val y = pad + ((1.0 - (wp.lat - minLat) / latSpan) * innerH).toFloat()
+                    if (i == 0) completedPath.moveTo(x, y) else completedPath.lineTo(x, y)
+                }
+                completedPath.lineTo(rx, ry)
+                drawPath(
+                    path = completedPath,
+                    color = SignalEmerald,
+                    style = Stroke(width = 5f, cap = StrokeCap.Round)
+                )
+
+                drawCircle(
+                    color = SignalEmerald.copy(alpha = 0.45f),
+                    radius = 12f,
+                    center = Offset(rx, ry)
+                )
                 drawCircle(
                     color = Color.White,
                     radius = 7.5f,

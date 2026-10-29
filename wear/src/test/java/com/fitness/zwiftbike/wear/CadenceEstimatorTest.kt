@@ -38,4 +38,17 @@ class CadenceEstimatorTest {
         val afterStopRpm = estimator.getCurrentRpm(ts + 3_000_000_000L)
         assertEquals(0f, afterStopRpm, 0.01f)
     }
+
+    @Test
+    fun getCurrentRpmPreservesRpmDuringActivePedaling() {
+        val estimator = CadenceEstimator()
+        val expectedOmega = ((2.0 * PI * 90.0 * 0.85) / 60.0).toFloat()
+        var ts = 10_000_000_000L
+        repeat(30) {
+            estimator.onGyroSample(0f, 0f, expectedOmega, ts)
+            ts += 50_000_000L
+        }
+        val currentRpm = estimator.getCurrentRpm(ts + 80_000_000L) // 80ms later
+        assertTrue("Expected RPM > 80, got $currentRpm", currentRpm > 80f)
+    }
 }

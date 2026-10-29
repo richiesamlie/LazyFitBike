@@ -36,6 +36,25 @@ class CyclingPhysics(
     var totalCaloriesKcal: Float = 0f
         private set
 
+    private fun computeHrPowerAndRpm(bpm: Int): Pair<Float, Float> {
+        if (bpm < restingHr + 8f) return 0f to 0f
+        val hrr = ((bpm - restingHr) / (maxHr - restingHr)).coerceIn(0f, 1.2f)
+        val watts = (ftpWatts * hrr.pow(1.35f)).coerceIn(0f, 900f)
+        val syntheticRpm = if (watts > 0f) {
+            (55f + (watts / ftpWatts) * 35f).coerceIn(50f, 110f)
+        } else {
+            0f
+        }
+        return watts to syntheticRpm
+    }
+
+    private fun computeRpmPower(rpm: Float, safeGear: Int): Pair<Float, Float> {
+        if (rpm < 5f) return 0f to 0f
+        val gearMultiplier = 0.50f + (safeGear * 0.12f)
+        val watts = (gearMultiplier * 0.032f * rpm.pow(1.85f)).coerceIn(0f, 1200f)
+        return watts to rpm.coerceIn(0f, 160f)
+    }
+
     fun computePowerWatts(
         mode: String,
         rpm: Float,
@@ -44,26 +63,19 @@ class CyclingPhysics(
     ): Pair<Float, Float> {
         val safeGear = gear.coerceIn(1, 12)
         return if (mode == "WRIST") {
-            if (bpm < restingHr + 8f) {
-                0f to 0f
+            val (hrWatts, hrRpm) = computeHrPowerAndRpm(bpm)
+            if (rpm >= 5f) {
+                val (rpmWatts, activeRpm) = computeRpmPower(rpm, safeGear)
+                if (rpmWatts > hrWatts) rpmWatts to activeRpm else hrWatts to hrRpm
             } else {
-                val hrr = ((bpm - restingHr) / (maxHr - restingHr)).coerceIn(0f, 1.2f)
-                val watts = (ftpWatts * hrr.pow(1.35f)).coerceIn(0f, 900f)
-                val syntheticRpm = if (watts > 0f) {
-                    (55f + (watts / ftpWatts) * 35f).coerceIn(50f, 110f)
-                } else {
-                    0f
-                }
-                watts to syntheticRpm
+                hrWatts to hrRpm
             }
         } else {
-            // ANKLE RPM mode
-            if (rpm < 5f) {
-                0f to 0f
+            // ANKLE mode with automatic HR fallback when gyro RPM is 0
+            if (rpm >= 5f) {
+                computeRpmPower(rpm, safeGear)
             } else {
-                val gearMultiplier = 0.50f + (safeGear * 0.12f)
-                val watts = (gearMultiplier * 0.032f * rpm.pow(1.85f)).coerceIn(0f, 1200f)
-                watts to rpm.coerceIn(0f, 160f)
+                computeHrPowerAndRpm(bpm)
             }
         }
     }
@@ -107,7 +119,8 @@ class CyclingPhysics(
         overrideGradePercent: Float? = null
     ): PhysicsStepResult {
         val dt = dtSeconds.coerceIn(0.001f, 1.0f)
-        val (watts, effectiveRpm) = computePowerWatts(mode, rpm, bpm, gear)
+        val safeGear = gear.coerceIn(1, 12)
+        val (watts, effectiveRpm) = computePowerWatts(mode, rpm, bpm, safeGear)
         val gradePercent = overrideGradePercent ?: getCourseGradePercent(totalDistanceMeters)
 
         val vMs = currentSpeedKmh / 3.6f
@@ -116,14 +129,33 @@ class CyclingPhysics(
         val dragFactor = if (isDrafting) 0.75f else 1.0f
         val fAero = 0.5f * 1.225f * 0.32f * dragFactor * vMs * vMs
         val fRoll = totalMass * 9.81f * 0.004f
-        val fGrav = totalMass * 9.81f * (gradePercent / 100f)
+
+        // Indoor Trainer Difficulty (40%) + virtual cassette mechanical advantage so steep climbs (e.g. +15.3% Alpe d'Huez) never stall at 0 km/h
+        val effectiveGrade = if (gradePercent > 0f) {
+            val gearClimbFactor = (0.75f + (safeGear - 1) * 0.045f).coerceIn(0.75f, 1.25f)
+            (gradePercent * 0.40f * gearClimbFactor).coerceAtMost(6.0f)
+        } else {
+            gradePercent * 0.60f
+        }
+        val fGrav = totalMass * 9.81f * (effectiveGrade / 100f)
+
+        val minCrawlVMs = if (watts > 0.5f) {
+            (0.9f + (watts / 85f)).coerceIn(1.1f, 4.5f)
+        } else {
+            0f
+        }
 
         val accelMs2 = if (watts <= 0.5f && gradePercent >= -0.5f) {
             // Smooth coast-down when rider stops pedaling
             -1.2f
         } else {
-            val fDrive = watts / max(vMs, 1.5f)
-            (fDrive - fAero - fRoll - fGrav) / totalMass
+            val fDrive = watts / max(vMs, 0.8f)
+            val rawAccel = (fDrive - fAero - fRoll - fGrav) / totalMass
+            if (watts > 0.5f && vMs < minCrawlVMs && rawAccel < 0.85f) {
+                0.85f
+            } else {
+                rawAccel
+            }
         }
 
         val nextVMs = (vMs + accelMs2 * dt).coerceIn(0f, 22.2f)

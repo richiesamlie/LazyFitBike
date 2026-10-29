@@ -17,14 +17,14 @@ class CadenceEstimator {
     companion object {
         private const val WINDOW_NS = 3_000_000_000L // 3.0 seconds rolling window
         private const val TIMEOUT_NS = 2_500_000_000L // 2.5 seconds inactivity timeout
-        private const val DEADBAND_RAD_PER_SEC = 0.65f
+        private const val DEADBAND_RAD_PER_SEC = 0.45f
         private const val ANKLE_ARTICULATION_FACTOR = 0.85f
         private const val EMA_ALPHA = 0.25f
     }
 
     @Synchronized
     fun onGyroSample(wx: Float, wy: Float, wz: Float, timestampNs: Long): Float {
-        if (lastSampleNs > 0L && timestampNs - lastSampleNs > TIMEOUT_NS) {
+        if (lastSampleNs > 0L && (timestampNs - lastSampleNs > TIMEOUT_NS || timestampNs < lastSampleNs)) {
             samples.clear()
             smoothedRpm = 0f
         }

@@ -85,4 +85,30 @@ class CyclingPhysicsTest {
         assertEquals(88.5f, parsed?.rpm ?: 0f, 0.01f)
         assertEquals(146, parsed?.bpm)
     }
+
+    @Test
+    fun alpeDhuezSteepClimbAcceleratesFromRestInDemoAndLowPower() {
+        val physics = CyclingPhysics()
+        // Simulate Alpe d'Huez +15.26% starting grade at demo cadence (86 RPM, Gear 7)
+        repeat(20) {
+            physics.step(
+                dtSeconds = 0.2f,
+                mode = "ANKLE",
+                rpm = 86f,
+                bpm = 144,
+                gear = 7,
+                overrideGradePercent = 15.26f
+            )
+        }
+        assertTrue("Speed on Alpe d'Huez should exceed 5 km/h, got ${physics.currentSpeedKmh}", physics.currentSpeedKmh > 5f)
+        assertTrue("Distance should advance, got ${physics.totalDistanceMeters}", physics.totalDistanceMeters > 2f)
+
+        // Verify hybrid fallback: Ankle mode with zero RPM but live HR produces power
+        val (fallbackWatts, _) = physics.computePowerWatts(mode = "ANKLE", rpm = 0f, bpm = 135, gear = 7)
+        assertTrue("Expected hybrid HR fallback watts > 50W, got $fallbackWatts", fallbackWatts > 50f)
+
+        // Verify hybrid fallback: Wrist mode with movement (gyro RPM) produces power even if HR is low
+        val (motionWatts, _) = physics.computePowerWatts(mode = "WRIST", rpm = 80f, bpm = 60, gear = 7)
+        assertTrue("Expected hybrid motion watts > 50W, got $motionWatts", motionWatts > 50f)
+    }
 }

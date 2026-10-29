@@ -63,7 +63,7 @@ data class RideUiState(
     val isMapModalOpen: Boolean = false,
     val isStravaModalOpen: Boolean = false,
     val isUpdateModalOpen: Boolean = false,
-    val installedVersionName: String = "v1.3.2",
+    val installedVersionName: String = "v1.3.3",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
@@ -137,9 +137,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     private fun resolveInstalledVersion(app: Application): String {
         return runCatching {
             val info = app.packageManager.getPackageInfo(app.packageName, 0)
-            val vName = info.versionName ?: "1.3.2"
+            val vName = info.versionName ?: "1.3.3"
             if (vName.startsWith("v")) vName else "v$vName"
-        }.getOrDefault("v1.3.2")
+        }.getOrDefault("v1.3.3")
     }
 
     init {
@@ -178,8 +178,13 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     ConnectionState.LIVE_WATCH -> {
                         inputRpm = watchRpm
-                        inputBpm = if (watchBpm > 0) watchBpm else {
-                            if (watchRpm > 5f) (92f + watchRpm * 0.55f).roundToInt() else 70
+                        inputBpm = when {
+                            watchBpm >= 68 -> watchBpm
+                            watchBpm > 0 && current.sensorMode == "WRIST" -> 82 // Active workout floor when testing at resting HR
+                            watchBpm > 0 -> watchBpm
+                            watchRpm > 5f -> (92f + watchRpm * 0.55f).roundToInt()
+                            current.sensorMode == "WRIST" -> 82
+                            else -> 0
                         }
                     }
                     ConnectionState.WAITING_FOR_WATCH,
@@ -224,7 +229,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
 
                 val gpsAfterStep = GpsRouteEngine.interpolateAtDistance(activeRoute, stepResult.distanceMeters)
 
-                if (stepResult.speedKmh > 0.5f) {
+                if (stepResult.speedKmh > 0.1f || stepResult.watts > 0.5f) {
                     elapsedAccumulatorSec += dt
                     val wholeSec = elapsedAccumulatorSec.toInt()
                     if (wholeSec > lastRecordedElapsedSec) {

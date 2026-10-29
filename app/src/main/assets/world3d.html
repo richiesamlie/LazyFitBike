@@ -245,12 +245,28 @@
         }
       }
 
-      // Draw active GPS Route Polyline with outer casing for readability on map tiles
+      // Find closest waypoint index to split Completed (Green) vs Upcoming (Orange) trail
+      let closestIdx = 0;
+      let minSqDist = Infinity;
+      for (let i = 0; i < routeWaypoints.length; i++) {
+        const dLat = routeWaypoints[i][0] - state.lat;
+        const dLon = routeWaypoints[i][1] - state.lon;
+        const sq = dLat * dLat + dLon * dLon;
+        if (sq < minSqDist) {
+          minSqDist = sq;
+          closestIdx = i;
+        }
+      }
+
+      const rx = boxX + boxW * 0.5;
+      const ry = boxY + boxH * 0.5;
+
+      // Draw active GPS Route Polyline with outer casing
       if (routeWaypoints.length >= 2) {
         targetCtx.lineCap = 'round';
         targetCtx.lineJoin = 'round';
-        targetCtx.strokeStyle = 'rgba(9, 9, 11, 0.75)';
-        targetCtx.lineWidth = 7;
+        targetCtx.strokeStyle = 'rgba(9, 9, 11, 0.8)';
+        targetCtx.lineWidth = 8;
         targetCtx.beginPath();
         for (let i = 0; i < routeWaypoints.length; i++) {
           const wp = routeWaypoints[i];
@@ -261,8 +277,23 @@
         }
         targetCtx.stroke();
 
+        // Upcoming route in Orange
         targetCtx.strokeStyle = '#f97316';
-        targetCtx.lineWidth = 4;
+        targetCtx.lineWidth = 4.5;
+        targetCtx.stroke();
+
+        // Completed trail from Start to Rider in Emerald Green
+        targetCtx.strokeStyle = '#10b981';
+        targetCtx.lineWidth = 5;
+        targetCtx.beginPath();
+        for (let i = 0; i <= closestIdx; i++) {
+          const wp = routeWaypoints[i];
+          const px = boxX + boxW * 0.5 + (lonToTileX(wp[1], zoom) - centerTileX) * 256;
+          const py = boxY + boxH * 0.5 + (latToTileY(wp[0], zoom) - centerTileY) * 256;
+          if (i === 0) targetCtx.moveTo(px, py);
+          else targetCtx.lineTo(px, py);
+        }
+        targetCtx.lineTo(rx, ry);
         targetCtx.stroke();
       }
 
@@ -276,16 +307,33 @@
         targetCtx.fill();
       }
 
-      // Draw Current Rider GPS Pin at center
-      const rx = boxX + boxW * 0.5;
-      const ry = boxY + boxH * 0.5;
+      // Animated pulsing radar ring + Current Rider GPS Pin
+      const pulseRadius = 9 + (Math.sin(performance.now() * 0.008) + 1) * 5;
+      targetCtx.fillStyle = 'rgba(249, 115, 22, 0.32)';
+      targetCtx.beginPath();
+      targetCtx.arc(rx, ry, pulseRadius, 0, Math.PI * 2);
+      targetCtx.fill();
+
       targetCtx.fillStyle = '#f97316';
       targetCtx.beginPath();
-      targetCtx.arc(rx, ry, 6.5, 0, Math.PI * 2);
+      targetCtx.arc(rx, ry, 7, 0, Math.PI * 2);
       targetCtx.fill();
       targetCtx.strokeStyle = '#ffffff';
-      targetCtx.lineWidth = 2;
+      targetCtx.lineWidth = 2.5;
       targetCtx.stroke();
+
+      // Live Telemetry Overlay Badge inside Map
+      targetCtx.fillStyle = 'rgba(9, 9, 11, 0.85)';
+      fillRoundedRect(targetCtx, boxX + 10, boxY + 10, 250, 26, 6);
+      targetCtx.fillStyle = '#f4f4f5';
+      targetCtx.font = 'bold 11px sans-serif';
+      targetCtx.textAlign = 'left';
+      targetCtx.fillText(
+        'LIVE GPS: ' + state.speedKmh.toFixed(1) + ' km/h  |  ' +
+        (state.distanceMeters / 1000).toFixed(2) + ' km (' + Math.round(state.distanceMeters) + ' m)',
+        boxX + 18,
+        boxY + 27
+      );
 
       targetCtx.restore();
     }
@@ -295,7 +343,7 @@
       const rect = fullMapCanvas.getBoundingClientRect();
       const clickX = ev.clientX - rect.left;
       const clickY = ev.clientY - rect.top;
-      const zoom = 13;
+      const zoom = 15;
       const centerTileX = lonToTileX(state.lon, zoom);
       const centerTileY = latToTileY(state.lat, zoom);
 
@@ -506,7 +554,7 @@
         const h = canvas.height;
 
         if (state.cameraMode === 'MAP') {
-          renderGpsMap(ctx, 0, 0, w, h, 14);
+          renderGpsMap(ctx, 0, 0, w, h, 15);
         } else {
           const gradeShift = Math.max(-45, Math.min(45, state.gradePercent * 5.5));
           const camHorizonFactor = state.cameraMode === 'DRONE' ? 0.32 : (state.cameraMode === 'POV' ? 0.48 : 0.42);
@@ -639,7 +687,7 @@
 
         // Render Full-Screen Interactive Online Map when modal is open
         if (state.isMapModalOpen) {
-          renderGpsMap(fullMapCtx, 0, 0, fullMapCanvas.width, fullMapCanvas.height, 13);
+          renderGpsMap(fullMapCtx, 0, 0, fullMapCanvas.width, fullMapCanvas.height, 15);
         }
       } finally {
         requestAnimationFrame(render);
