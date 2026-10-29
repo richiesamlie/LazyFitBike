@@ -15,3 +15,11 @@ local.properties
 .externalNativeBuild
 .cxx
 scratch/
+
+# Android signing keystores and secrets
+*.jks
+*.keystore
+keystore/
+*.key
+*.p12
+*.pfx

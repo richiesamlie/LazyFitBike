@@ -15,23 +15,34 @@ android {
         versionName = "1.3.3"
     }
 
+    val keystoreFile = file(System.getenv("KEYSTORE_FILE") ?: "../keystore/lazyfitbike.jks")
+    val keystorePass = System.getenv("KEYSTORE_PASSWORD") ?: "lazyfitbike123"
+    val keystoreAlias = System.getenv("KEY_ALIAS") ?: "lazyfitbike"
+    val keystoreKeyPass = System.getenv("KEY_PASSWORD") ?: "lazyfitbike123"
+
     signingConfigs {
-        getByName("debug") {
-            storeFile = file("../keystore/lazyfitbike.jks")
-            storePassword = "lazyfitbike123"
-            keyAlias = "lazyfitbike"
-            keyPassword = "lazyfitbike123"
+        create("release") {
+            if (keystoreFile.exists()) {
+                storeFile = keystoreFile
+                storePassword = keystorePass
+                keyAlias = keystoreAlias
+                keyPassword = keystoreKeyPass
+            }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("debug")
+            if (keystoreFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            if (keystoreFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

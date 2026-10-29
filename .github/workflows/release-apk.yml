@@ -22,12 +22,28 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
+      - name: Decode Release Signing Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p keystore
+          echo "$KEYSTORE_BASE64" | base64 --decode > keystore/lazyfitbike.jks
+
       - name: Build Minified Release Phone and Galaxy Watch 4 APKs
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           chmod +x gradlew
           ./gradlew :app:testDebugUnitTest :wear:testDebugUnitTest :app:assembleRelease :wear:assembleRelease
           cp app/build/outputs/apk/release/app-release.apk LazyFitBike-phone.apk
           cp wear/build/outputs/apk/release/wear-release.apk LazyFitBike-watch.apk
+
+      - name: Clean up Keystore File
+        if: always()
+        run: |
+          rm -f keystore/lazyfitbike.jks
 
       - name: Publish APKs to Matching Version GitHub Release
         env:
