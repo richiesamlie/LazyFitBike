@@ -240,33 +240,6 @@ private val Zone3Green = Color(0xFF34D399)
 private val Zone4Amber = Color(0xFFFBBF24)
 private val Zone5Red = Color(0xFFF43F5E)
 
-private fun zoneColor(zone: Int): Color = when (zone) {
-    1 -> Zone1Gray
-    2 -> Zone2Blue
-    3 -> Zone3Green
-    4 -> Zone4Amber
-    else -> Zone5Red
-}
-
-@Composable
-private fun MiniZoneBar(activeZone: Int, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier.height(5.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp)
-    ) {
-        for (z in 1..5) {
-            val c = zoneColor(z)
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(if (z <= activeZone) c else c.copy(alpha = 0.22f))
-            )
-        }
-    }
-}
-
 private val TabularStyle = TextStyle(fontFeatureSettings = "tnum")
 
 private fun pushRoutePolylineToWebView(view: WebView?, polylineJson: String) {
@@ -280,7 +253,7 @@ private fun pushRoutePolylineToWebView(view: WebView?, polylineJson: String) {
 private fun pushRideStateToWebView(view: WebView?, state: RideUiState) {
     val jsCall = String.format(
         Locale.US,
-        "if(window.updateRideState){window.updateRideState(%.2f,%d,%d,%.2f,%.2f,'%s',%.6f,%.6f,%.3f,%b);}",
+        "if(window.updateRideState){window.updateRideState(%.2f,%d,%d,%.2f,%.2f,'%s',%.6f,%.6f,%.3f,%b,%d,%.2f,%d,%d,%d,%d,'%s');}",
         state.speedKmh,
         state.rpm,
         state.watts,
@@ -290,7 +263,14 @@ private fun pushRideStateToWebView(view: WebView?, state: RideUiState) {
         state.currentLat,
         state.currentLon,
         state.currentCurvature,
-        state.isMapModalOpen
+        state.isMapModalOpen,
+        state.bpm,
+        state.wattsPerKg,
+        state.ftpWatts,
+        state.powerZone,
+        state.hrZone,
+        state.elapsedSeconds,
+        state.activeRouteName.replace("'", "\\'")
     )
     view?.evaluateJavascript(jsCall, null)
 }
@@ -337,7 +317,14 @@ fun LazyFitBikeCockpitScreen(
         state.currentLat,
         state.currentLon,
         state.currentCurvature,
-        state.isMapModalOpen
+        state.isMapModalOpen,
+        state.bpm,
+        state.wattsPerKg,
+        state.ftpWatts,
+        state.powerZone,
+        state.hrZone,
+        state.elapsedSeconds,
+        state.activeRouteName
     ) {
         pushRideStateToWebView(webViewRef, state)
     }
@@ -395,254 +382,134 @@ fun LazyFitBikeCockpitScreen(
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.Top
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // ZONE A: Primary Effort Pod (Glowing 5-Zone Color-Coded)
-                    val activePodZone = if (state.sensorMode == "WRIST") state.hrZone else state.powerZone
-                    val pZoneColor = zoneColor(state.powerZone)
-                    val hrZoneColor = zoneColor(state.hrZone)
-                    HudPod(
-                        modifier = Modifier.weight(1f),
-                        borderColor = if (state.watts > 0 || state.bpm > 0) zoneColor(activePodZone) else BorderZinc
+                    // Left Quick Controls: Route Picker + Separate Sensor Mode Button (both >= 48dp touch target)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        // Route Pill (48dp height min)
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Bottom
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(BgCarbonHud)
+                                .border(1.dp, BorderZinc, RoundedCornerShape(10.dp))
+                                .clickable { onSetMapModalOpen(!state.isMapModalOpen) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = "POWER",
-                                        color = TextMutedZinc,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        text = CyclingPhysics.zoneShortName(state.powerZone),
-                                        color = pZoneColor,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Black
-                                    )
-                                }
-                                Row(verticalAlignment = Alignment.Bottom) {
-                                    Text(
-                                        text = state.watts.toString(),
-                                        style = TabularStyle,
-                                        color = pZoneColor,
-                                        fontSize = 26.sp,
-                                        fontWeight = FontWeight.Black
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "W",
-                                        color = TextMutedZinc,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(3.dp))
-                                MiniZoneBar(
-                                    activeZone = state.powerZone,
-                                    modifier = Modifier.fillMaxWidth(0.85f)
-                                )
+                            val dotColor = when (state.connectionState) {
+                                ConnectionState.LIVE_WATCH -> SignalEmerald
+                                ConnectionState.DEMO_MODE -> AccentOrange
+                                ConnectionState.WAITING_FOR_WATCH,
+                                ConnectionState.SIGNAL_LOST -> SignalAmber
                             }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    text = "W / KG",
-                                    color = TextMutedZinc,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = String.format(Locale.US, "%.1f", state.wattsPerKg),
-                                    style = TabularStyle,
-                                    color = TextPrimaryWhite,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "FTP ${state.ftpWatts}W",
-                                    style = TabularStyle,
-                                    color = TextMutedZinc,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 5.dp),
-                            color = BorderZinc
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Bottom
-                        ) {
-                            Column {
-                                Text(
-                                    text = "CADENCE",
-                                    color = TextMutedZinc,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "${state.rpm} RPM",
-                                    style = TabularStyle,
-                                    color = TextPrimaryWhite,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Column(
-                                horizontalAlignment = Alignment.End,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = CyclingPhysics.zoneShortName(state.hrZone),
-                                        color = hrZoneColor,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Black
-                                    )
-                                    Text(
-                                        text = "HEART RATE",
-                                        color = TextMutedZinc,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                                val bpmText = if (state.bpm > 0) "${state.bpm} BPM" else "READY"
-                                Text(
-                                    text = bpmText,
-                                    style = TabularStyle,
-                                    color = if (state.bpm > 0) hrZoneColor else SignalRose,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(3.dp))
-                                MiniZoneBar(
-                                    activeZone = if (state.bpm > 0) state.hrZone else 1,
-                                    modifier = Modifier.fillMaxWidth(0.75f)
-                                )
-                            }
-                        }
-                    }
-
-                    // ZONE B: Route Progress Pod
-                    HudPod(modifier = Modifier.weight(1.1f)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            MetricColumn(
-                                label = "SPEED",
-                                value = String.format(Locale.US, "%.1f", state.speedKmh),
-                                unit = "km/h"
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(dotColor)
                             )
-                            MetricColumn(
-                                label = "DIST",
-                                value = String.format(Locale.US, "%.2f", state.distanceKm),
-                                unit = "km"
-                            )
-                            MetricColumn(
-                                label = "TIME",
-                                value = formatElapsedTime(state.elapsedSeconds),
-                                unit = "min"
-                            )
-                        }
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            color = BorderZinc
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
                             Text(
                                 text = state.activeRouteName,
-                                color = TextMutedZinc,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimaryWhite,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "REC ${state.recordedTrackPointsCount} pts",
-                                style = TabularStyle,
-                                color = SignalEmerald,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                                modifier = Modifier.widthIn(max = 160.dp)
                             )
                         }
-                    }
 
-                    // ZONE C: Corner Live GPS Mini-Map + Grade
-                    HudPod(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { onSetMapModalOpen(!state.isMapModalOpen) }
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        // Sensor Mode Button (48dp x 48dp min)
+                        Button(
+                            onClick = onToggleSensorMode,
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .widthIn(min = 48.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = BgCarbonHud,
+                                contentColor = if (state.sensorMode == "WRIST") SignalRose else AccentOrange
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BorderZinc),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                val dotColor = when (state.connectionState) {
-                                    ConnectionState.LIVE_WATCH -> SignalEmerald
-                                    ConnectionState.DEMO_MODE -> AccentOrange
-                                    ConnectionState.WAITING_FOR_WATCH,
-                                    ConnectionState.SIGNAL_LOST -> SignalAmber
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(dotColor)
-                                )
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text(
-                                    text = "GPS MAP (TAP)",
-                                    color = TextPrimaryWhite,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            val gradeSign = if (state.slopeGradePercent >= 0f) "+" else ""
                             Text(
-                                text = String.format(
-                                    Locale.US,
-                                    "%s%.1f%%",
-                                    gradeSign,
-                                    state.slopeGradePercent
-                                ),
-                                style = TabularStyle,
-                                color = SignalAmber,
-                                fontSize = 14.sp,
+                                text = state.sensorMode,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Black
                             )
                         }
+                    }
 
-                        Spacer(modifier = Modifier.height(5.dp))
-
-                        MiniGpsRouteCanvas(
-                            waypoints = state.activeRouteWaypoints,
-                            lat = state.currentLat,
-                            lon = state.currentLon
+                    // Center Live Mode Pill (Cam toggle, 48dp height min)
+                    Row(
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(BgCarbonHud)
+                            .border(1.dp, BorderZinc, RoundedCornerShape(10.dp))
+                            .clickable(onClick = onCycleCamera)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Text(
+                            text = "3D VISOR HUD",
+                            color = AccentOrange,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black
                         )
+                        Text(
+                            text = "•",
+                            color = TextMutedZinc,
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            text = state.cameraMode,
+                            color = TextPrimaryWhite,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // Right Quick Action Pill: Rec points + Quick Map button (48dp height min)
+                    Row(
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(BgCarbonHud)
+                            .border(1.dp, BorderZinc, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "REC ${state.recordedTrackPointsCount} pts",
+                            style = TabularStyle,
+                            color = SignalEmerald,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Button(
+                            onClick = { onSetMapModalOpen(!state.isMapModalOpen) },
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .widthIn(min = 48.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (state.isMapModalOpen) AccentOrange else BgControlDark,
+                                contentColor = TextPrimaryWhite
+                            ),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(text = "Map", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
 
@@ -724,6 +591,14 @@ fun LazyFitBikeCockpitScreen(
                                 Text(text = "Close", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        MiniGpsRouteCanvas(
+                            waypoints = state.activeRouteWaypoints,
+                            lat = state.currentLat,
+                            lon = state.currentLon
+                        )
 
                         Spacer(modifier = Modifier.height(6.dp))
 
@@ -1743,10 +1618,4 @@ private fun MetricColumn(label: String, value: String, unit: String) {
             fontWeight = FontWeight.Medium
         )
     }
-}
-
-private fun formatElapsedTime(totalSeconds: Int): String {
-    val mins = totalSeconds / 60
-    val secs = totalSeconds % 60
-    return String.format(Locale.US, "%02d:%02d", mins, secs)
 }

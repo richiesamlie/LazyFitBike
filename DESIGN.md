@@ -21,6 +21,7 @@ Reading this as: real-time 3D sports telemetry HUD and Wear OS sensor companion 
 - Minimum touch target size on all interactive controls: `48dp x 48dp`.
 
 ## One-Line Decision Log (Rule R-31)
+- **Why Three.js Curved Holographic Visor HUD?** Replaces flat/shapey 2D canvas boxes with a 3D cylindrical cockpit visor running dynamic high-DPI canvas textures, delivering true 60 FPS WebGL depth, dynamic 5-zone power arc glows, and immersive camera inertia.
 - **Why dark matte HUD pods?** Indoor rides happen in varied room lighting where solid high-contrast pods remain legible over moving 3D road geometry without blur artifacts.
 - **Why Velodrome Orange as the sole accent?** Draws peripheral vision immediately to live Power (Watts) and primary gear/start controls without visual noise.
 - **Why tabular numerals?** Prevents 10 Hz cadence and wattage updates from shifting card widths.

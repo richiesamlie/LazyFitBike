@@ -3,24 +3,44 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>LazyFitBike 3D World &amp; Online GPS Map</title>
+  <title>LazyFitBike 3D Cockpit &amp; Holographic Visor HUD</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #09090B; font-family: sans-serif; }
-    #world { display: block; width: 100%; height: 100%; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #09090B;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #viewport-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    #three-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
     #fullmap-container {
       display: none;
       position: absolute;
-      top: 118px;
-      bottom: 78px;
-      left: 316px;
+      top: 60px;
+      bottom: 74px;
+      left: 310px;
       right: 14px;
       border-radius: 14px;
       border: 2px solid #F97316;
       background: #0F172A;
       overflow: hidden;
-      z-index: 5;
-      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.65);
+      z-index: 50;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.75);
     }
     #fullmap-canvas {
       width: 100%;
@@ -33,33 +53,41 @@
       bottom: 8px;
       left: 10px;
       right: 10px;
-      background: rgba(9, 9, 11, 0.88);
+      background: rgba(9, 9, 11, 0.90);
       color: #F4F4F5;
       border: 1px solid #27272A;
-      padding: 6px 10px;
+      padding: 6px 12px;
       border-radius: 8px;
       font-size: 11px;
       font-weight: 600;
       pointer-events: none;
       font-variant-numeric: tabular-nums;
     }
+    #fallback-2d-canvas {
+      display: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 10;
+    }
   </style>
+  <script src="js/three.min.js"></script>
 </head>
 <body>
-  <canvas id="world"></canvas>
+  <div id="viewport-container">
+    <canvas id="three-canvas"></canvas>
+    <canvas id="fallback-2d-canvas"></canvas>
+  </div>
+
   <div id="fullmap-container">
     <canvas id="fullmap-canvas"></canvas>
     <div id="map-hint">OpenStreetMap Live View: Tap any 2 points on the map to build an OSRM road route.</div>
   </div>
 
   <script>
-    const canvas = document.getElementById('world');
-    const ctx = canvas.getContext('2d');
-    const fullMapContainer = document.getElementById('fullmap-container');
-    const fullMapCanvas = document.getElementById('fullmap-canvas');
-    const fullMapCtx = fullMapCanvas.getContext('2d');
-    const mapHintEl = document.getElementById('map-hint');
-
+    // State management & telemetry bridge
     const state = {
       speedKmh: 0,
       rpm: 0,
@@ -71,7 +99,16 @@
       lon: 6.0358,
       curvature: 0,
       isMapModalOpen: false,
-      crankAngleRad: 0
+      crankAngleRad: 0,
+      // Extended telemetry
+      bpm: 0,
+      wattsPerKg: 0.0,
+      ftpWatts: 200,
+      powerZone: 1,
+      hrZone: 1,
+      elapsedSeconds: 0,
+      activeRouteName: "Alpe d'Huez Climb",
+      wheelRotationRad: 0
     };
 
     let routeWaypoints = [
@@ -82,18 +119,31 @@
       [45.0924, 6.0706, 1815]
     ];
 
-    // Cache of OpenStreetMap 256x256 tiles: key "z/x/y" -> Image
-    const osmTileCache = {};
-    let tapStartLatLon = null;
+    const ZONE_COLORS = {
+      1: '#94A3B8', // Zone 1 Gray: Active Recovery
+      2: '#38BDF8', // Zone 2 Blue: Endurance
+      3: '#34D399', // Zone 3 Green: Tempo
+      4: '#F97316', // Zone 4 Orange: Threshold
+      5: '#F43F5E'  // Zone 5 Red: VO2 Max / Anaerobic
+    };
+
+    const ZONE_NAMES = {
+      1: 'Z1 RECOVERY',
+      2: 'Z2 ENDURANCE',
+      3: 'Z3 TEMPO',
+      4: 'Z4 THRESHOLD',
+      5: 'Z5 VO2 MAX'
+    };
 
     const bots = [
-      { name: 'Bot A (1.8 W/kg)', speedMs: 7.2, dist: 40, color: '#38bdf8', laneOffset: 0.32 },
-      { name: 'Bot B (2.2 W/kg)', speedMs: 8.1, dist: 95, color: '#a3e635', laneOffset: -0.28 },
-      { name: 'Bot C (2.5 W/kg)', speedMs: 8.8, dist: 18, color: '#fbbf24', laneOffset: 0.18 },
-      { name: 'Bot D (3.0 W/kg)', speedMs: 9.8, dist: 180, color: '#f472b6', laneOffset: -0.22 },
-      { name: 'Bot E (3.6 W/kg)', speedMs: 10.9, dist: 310, color: '#c084fc', laneOffset: 0.25 }
+      { name: 'Bot A (1.8 W/kg)', speedMs: 7.2, dist: 40, color: '#38bdf8', laneOffset: 0.8 },
+      { name: 'Bot B (2.2 W/kg)', speedMs: 8.1, dist: 95, color: '#a3e635', laneOffset: -0.7 },
+      { name: 'Bot C (2.5 W/kg)', speedMs: 8.8, dist: 18, color: '#fbbf24', laneOffset: 0.5 },
+      { name: 'Bot D (3.0 W/kg)', speedMs: 9.8, dist: 180, color: '#f472b6', laneOffset: -0.6 },
+      { name: 'Bot E (3.6 W/kg)', speedMs: 10.9, dist: 310, color: '#c084fc', laneOffset: 0.7 }
     ];
 
+    // Android bridge entry points
     window.setRoutePolyline = function(jsonArrayStr) {
       try {
         const parsed = typeof jsonArrayStr === 'string' ? JSON.parse(jsonArrayStr) : jsonArrayStr;
@@ -105,55 +155,56 @@
 
     window.updateRideState = function(
       speedKmh, rpm, watts, gradePercent, distanceMeters,
-      cameraMode, lat, lon, curvature, isMapModalOpen
+      cameraMode, lat, lon, curvature, isMapModalOpen,
+      bpm, wattsPerKg, ftpWatts, powerZone, hrZone, elapsedSeconds, activeRouteName
     ) {
       state.speedKmh = Number(speedKmh) || 0;
       state.rpm = Number(rpm) || 0;
-      state.watts = Number(watts) || 0;
+      state.watts = Math.max(0, Math.round(Number(watts) || 0));
       state.gradePercent = Number(gradePercent) || 0;
       state.distanceMeters = Number(distanceMeters) || 0;
       state.cameraMode = cameraMode || 'CHASE';
       if (lat !== undefined) state.lat = Number(lat) || state.lat;
       if (lon !== undefined) state.lon = Number(lon) || state.lon;
       if (curvature !== undefined) state.curvature = Number(curvature) || 0;
+
+      if (bpm !== undefined) state.bpm = Math.max(0, Math.round(Number(bpm) || 0));
+      if (wattsPerKg !== undefined) state.wattsPerKg = Number(wattsPerKg) || 0;
+      if (ftpWatts !== undefined && Number(ftpWatts) > 0) state.ftpWatts = Number(ftpWatts);
+      if (powerZone !== undefined && Number(powerZone) >= 1) state.powerZone = Math.min(5, Math.max(1, Math.round(Number(powerZone))));
+      if (hrZone !== undefined && Number(hrZone) >= 1) state.hrZone = Math.min(5, Math.max(1, Math.round(Number(hrZone))));
+      if (elapsedSeconds !== undefined) state.elapsedSeconds = Math.max(0, Math.round(Number(elapsedSeconds) || 0));
+      if (activeRouteName) state.activeRouteName = String(activeRouteName);
+
       const shouldShowMap = Boolean(isMapModalOpen);
       if (shouldShowMap !== state.isMapModalOpen) {
         state.isMapModalOpen = shouldShowMap;
         fullMapContainer.style.display = shouldShowMap ? 'block' : 'none';
         resize();
-        setTimeout(resize, 50);
       }
     };
 
-    function resize() {
-      canvas.width = Math.max(320, window.innerWidth || document.documentElement.clientWidth || 800);
-      canvas.height = Math.max(200, window.innerHeight || document.documentElement.clientHeight || 450);
-      if (state.isMapModalOpen) {
-        fullMapCanvas.width = Math.max(240, fullMapContainer.clientWidth || (canvas.width - 340));
-        fullMapCanvas.height = Math.max(160, fullMapContainer.clientHeight || (canvas.height - 200));
-      }
-    }
-    window.addEventListener('resize', resize);
-    resize();
-    setTimeout(resize, 100);
+    // OpenStreetMap 2D Map support (Modal & MAP mode)
+    const osmTileCache = {};
+    let tapStartLatLon = null;
+    const fullMapContainer = document.getElementById('fullmap-container');
+    const fullMapCanvas = document.getElementById('fullmap-canvas');
+    const fullMapCtx = fullMapCanvas.getContext('2d');
+    const mapHintEl = document.getElementById('map-hint');
 
-    // Web Mercator projection helpers for OpenStreetMap tiles
+    const fallback2dCanvas = document.getElementById('fallback-2d-canvas');
+    const fallbackCtx = fallback2dCanvas.getContext('2d');
+
     function lonToTileX(lon, zoom) {
       return ((lon + 180) / 360) * Math.pow(2, zoom);
     }
-
     function latToTileY(lat, zoom) {
       const rad = (lat * Math.PI) / 180;
-      return (
-        ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) *
-        Math.pow(2, zoom)
-      );
+      return (((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * Math.pow(2, zoom));
     }
-
     function tileXToLon(tileX, zoom) {
       return (tileX / Math.pow(2, zoom)) * 360 - 180;
     }
-
     function tileYToLat(tileY, zoom) {
       const n = Math.PI - (2 * Math.PI * tileY) / Math.pow(2, zoom);
       return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
@@ -172,13 +223,10 @@
           return existing;
         }
       }
-
       const img = new Image();
       img.loadedOk = false;
       img.triedFallback = false;
-      img.onload = function() {
-        img.loadedOk = true;
-      };
+      img.onload = function() { img.loadedOk = true; };
       img.onerror = function() {
         if (!img.triedFallback) {
           img.triedFallback = true;
@@ -192,14 +240,12 @@
       return img;
     }
 
-    // Renders an OpenStreetMap tile viewport + route polyline + live rider marker
     function renderGpsMap(targetCtx, boxX, boxY, boxW, boxH, zoom) {
       targetCtx.save();
       targetCtx.beginPath();
       targetCtx.rect(boxX, boxY, boxW, boxH);
       targetCtx.clip();
-
-      targetCtx.fillStyle = '#1e293b';
+      targetCtx.fillStyle = '#0f172a';
       targetCtx.fillRect(boxX, boxY, boxW, boxH);
 
       const centerTileX = lonToTileX(state.lon, zoom);
@@ -217,16 +263,13 @@
           const drawY = boxY + boxH * 0.5 + (ty - centerTileY) * 256;
           if (tileImg && tileImg.loadedOk) {
             anyTileLoaded = true;
-            try {
-              targetCtx.drawImage(tileImg, drawX, drawY, 256, 256);
-            } catch (e) {}
+            try { targetCtx.drawImage(tileImg, drawX, drawY, 256, 256); } catch (e) {}
           }
         }
       }
 
-      // Subtle contrast tint or offline tactical grid fallback
       if (anyTileLoaded) {
-        targetCtx.fillStyle = 'rgba(15, 23, 42, 0.12)';
+        targetCtx.fillStyle = 'rgba(15, 23, 42, 0.15)';
         targetCtx.fillRect(boxX, boxY, boxW, boxH);
       } else {
         targetCtx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
@@ -245,7 +288,6 @@
         }
       }
 
-      // Find closest waypoint index to split Completed (Green) vs Upcoming (Orange) trail
       let closestIdx = 0;
       let minSqDist = Infinity;
       for (let i = 0; i < routeWaypoints.length; i++) {
@@ -261,12 +303,11 @@
       const rx = boxX + boxW * 0.5;
       const ry = boxY + boxH * 0.5;
 
-      // Draw active GPS Route Polyline with outer casing
       if (routeWaypoints.length >= 2) {
         targetCtx.lineCap = 'round';
         targetCtx.lineJoin = 'round';
-        targetCtx.strokeStyle = 'rgba(9, 9, 11, 0.8)';
-        targetCtx.lineWidth = 8;
+        targetCtx.strokeStyle = 'rgba(9, 9, 11, 0.85)';
+        targetCtx.lineWidth = 7;
         targetCtx.beginPath();
         for (let i = 0; i < routeWaypoints.length; i++) {
           const wp = routeWaypoints[i];
@@ -277,14 +318,12 @@
         }
         targetCtx.stroke();
 
-        // Upcoming route in Orange
         targetCtx.strokeStyle = '#f97316';
-        targetCtx.lineWidth = 4.5;
+        targetCtx.lineWidth = 4;
         targetCtx.stroke();
 
-        // Completed trail from Start to Rider in Emerald Green
         targetCtx.strokeStyle = '#10b981';
-        targetCtx.lineWidth = 5;
+        targetCtx.lineWidth = 4.5;
         targetCtx.beginPath();
         for (let i = 0; i <= closestIdx; i++) {
           const wp = routeWaypoints[i];
@@ -297,7 +336,6 @@
         targetCtx.stroke();
       }
 
-      // Draw tapped start pin if building a custom OSRM route
       if (tapStartLatLon) {
         const sx = boxX + boxW * 0.5 + (lonToTileX(tapStartLatLon[1], zoom) - centerTileX) * 256;
         const sy = boxY + boxH * 0.5 + (latToTileY(tapStartLatLon[0], zoom) - centerTileY) * 256;
@@ -307,38 +345,37 @@
         targetCtx.fill();
       }
 
-      // Animated pulsing radar ring + Current Rider GPS Pin
-      const pulseRadius = 9 + (Math.sin(performance.now() * 0.008) + 1) * 5;
-      targetCtx.fillStyle = 'rgba(249, 115, 22, 0.32)';
+      const pulseRadius = 9 + (Math.sin(performance.now() * 0.008) + 1) * 4;
+      targetCtx.fillStyle = 'rgba(249, 115, 22, 0.35)';
       targetCtx.beginPath();
       targetCtx.arc(rx, ry, pulseRadius, 0, Math.PI * 2);
       targetCtx.fill();
 
       targetCtx.fillStyle = '#f97316';
       targetCtx.beginPath();
-      targetCtx.arc(rx, ry, 7, 0, Math.PI * 2);
+      targetCtx.arc(rx, ry, 6, 0, Math.PI * 2);
       targetCtx.fill();
       targetCtx.strokeStyle = '#ffffff';
-      targetCtx.lineWidth = 2.5;
+      targetCtx.lineWidth = 2;
       targetCtx.stroke();
 
-      // Live Telemetry Overlay Badge inside Map
-      targetCtx.fillStyle = 'rgba(9, 9, 11, 0.85)';
-      fillRoundedRect(targetCtx, boxX + 10, boxY + 10, 250, 26, 6);
+      targetCtx.fillStyle = 'rgba(9, 9, 11, 0.88)';
+      targetCtx.beginPath();
+      targetCtx.rect(boxX + 12, boxY + 12, 280, 28);
+      targetCtx.fill();
       targetCtx.fillStyle = '#f4f4f5';
       targetCtx.font = 'bold 11px sans-serif';
       targetCtx.textAlign = 'left';
       targetCtx.fillText(
-        'LIVE GPS: ' + state.speedKmh.toFixed(1) + ' km/h  |  ' +
-        (state.distanceMeters / 1000).toFixed(2) + ' km (' + Math.round(state.distanceMeters) + ' m)',
-        boxX + 18,
-        boxY + 27
+        'TACTICAL GPS: ' + state.speedKmh.toFixed(1) + ' km/h  |  ' +
+        (state.distanceMeters / 1000).toFixed(2) + ' km  |  ' + state.watts + ' W',
+        boxX + 20,
+        boxY + 30
       );
 
       targetCtx.restore();
     }
 
-    // Interactive 2-Tap OSRM Route Builder on Full-Screen Map Canvas
     fullMapCanvas.addEventListener('click', function(ev) {
       const rect = fullMapCanvas.getBoundingClientRect();
       const clickX = ev.clientX - rect.left;
@@ -355,8 +392,7 @@
       if (!tapStartLatLon) {
         tapStartLatLon = [clickedLat, clickedLon];
         mapHintEl.textContent =
-          'Start Pin set (' + clickedLat.toFixed(4) + ', ' + clickedLon.toFixed(4) +
-          '). Now tap Destination Pin on the map.';
+          'Start Pin set (' + clickedLat.toFixed(4) + ', ' + clickedLon.toFixed(4) + '). Tap Destination Pin.';
       } else {
         const sLat = tapStartLatLon[0];
         const sLon = tapStartLatLon[1];
@@ -369,332 +405,960 @@
       }
     });
 
-    let lastTime = performance.now();
+    // ==========================================
+    // THREE.JS 3D WORLD & CURVED VISOR HUD ENGINE
+    // ==========================================
+    const threeCanvas = document.getElementById('three-canvas');
+    let renderer, scene, camera, cameraRig;
+    let isThreeSupported = false;
+
+    // Road & Environment objects
+    let roadMesh, roadTexture, groundMesh, skyDome;
+    let treesGroup, archMesh, archSignCtx, archSignTexture, botsGroup, bikeGroup;
+    let visorMesh, hudCanvas, hudCtx, hudTexture;
+
+    // Avatar parts for articulation
+    let cyclistGroup, leftLegGroup, rightLegGroup, crankGroup, frontWheel, rearWheel;
+
+    function initThree() {
+      try {
+        if (typeof THREE === 'undefined') {
+          console.warn('Three.js not loaded, using fallback 2D engine');
+          return false;
+        }
+
+        renderer = new THREE.WebGLRenderer({
+          canvas: threeCanvas,
+          antialias: true,
+          powerPreference: 'high-performance'
+        });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.1;
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x09090b);
+        scene.fog = new THREE.FogExp2(0x0f172a, 0.009);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xffedd5, 1.3);
+        sunLight.position.set(20, 45, 30);
+        scene.add(sunLight);
+
+        const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.5);
+        fillLight.position.set(-20, 20, -20);
+        scene.add(fillLight);
+
+        // Camera rig
+        cameraRig = new THREE.Group();
+        camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 800);
+        cameraRig.add(camera);
+        scene.add(cameraRig);
+
+        createEnvironment();
+        createBicycleAndCyclist();
+        createBotPacers();
+        createCurvedVisorHud();
+
+        isThreeSupported = true;
+        return true;
+      } catch (err) {
+        console.error('Failed to initialize Three.js:', err);
+        return false;
+      }
+    }
 
     function roadCurveAt(zMeters) {
       return (
-        state.curvature * 0.9 +
-        Math.sin(zMeters * 0.008) * 1.1 +
-        Math.cos(zMeters * 0.0035) * 0.6
+        state.curvature * 1.0 +
+        Math.sin(zMeters * 0.0075) * 1.4 +
+        Math.cos(zMeters * 0.0032) * 0.8
       );
     }
 
-    function drawSkyAndMountains(w, h, horizonY, curveShift) {
-      const safeHorizon = Math.max(10, horizonY);
-      const skyGrad = ctx.createLinearGradient(0, 0, 0, safeHorizon);
-      skyGrad.addColorStop(0, '#1e3a8a');
-      skyGrad.addColorStop(0.55, '#0284c7');
-      skyGrad.addColorStop(1, '#7dd3fc');
-      ctx.fillStyle = skyGrad;
-      ctx.fillRect(0, 0, w, safeHorizon + 2);
+    // Sky Dome, Ground Terrain, Trees, & Banners
+    function createEnvironment() {
+      // Sky Dome
+      const skyGeo = new THREE.SphereGeometry(400, 24, 16);
+      const skyMat = new THREE.MeshBasicMaterial({
+        color: 0x0284c7,
+        side: THREE.BackSide
+      });
+      skyDome = new THREE.Mesh(skyGeo, skyMat);
+      skyDome.position.set(0, 0, -100);
+      scene.add(skyDome);
 
-      // Far alpine range
-      ctx.fillStyle = '#334155';
-      ctx.beginPath();
-      ctx.moveTo(0, safeHorizon);
-      const peaks = [
-        [0.0, 0.25], [0.14, 0.78], [0.28, 0.38], [0.45, 0.92],
-        [0.62, 0.42], [0.78, 0.84], [0.91, 0.48], [1.0, 0.30]
-      ];
-      for (let i = 0; i < peaks.length; i++) {
-        const px = ((peaks[i][0] * w - curveShift * 28) % w + w) % w;
-        const py = safeHorizon - peaks[i][1] * (h * 0.24);
-        ctx.lineTo(px, py);
-      }
-      ctx.lineTo(w, safeHorizon);
-      ctx.closePath();
-      ctx.fill();
+      // Rolling Ground
+      const groundGeo = new THREE.PlaneGeometry(350, 400, 16, 16);
+      groundGeo.rotateX(-Math.PI / 2);
+      const groundMat = new THREE.MeshLambertMaterial({ color: 0x14532d });
+      groundMesh = new THREE.Mesh(groundGeo, groundMat);
+      groundMesh.position.set(0, -0.05, -100);
+      scene.add(groundMesh);
 
-      // Near mountain foothills
-      ctx.fillStyle = '#475569';
-      ctx.beginPath();
-      ctx.moveTo(0, safeHorizon);
-      const foothills = [
-        [0.0, 0.14], [0.19, 0.44], [0.37, 0.22], [0.56, 0.50],
-        [0.74, 0.25], [0.89, 0.42], [1.0, 0.16]
-      ];
-      for (let i = 0; i < foothills.length; i++) {
-        const px = ((foothills[i][0] * w - curveShift * 42) % w + w) % w;
-        const py = safeHorizon - foothills[i][1] * (h * 0.18);
-        ctx.lineTo(px, py);
+      // 1. Procedural Scrolling Road Texture Canvas (Asphalt, Orange/White Curbs, Dashed Yellow Center)
+      const roadTexCanvas = document.createElement('canvas');
+      roadTexCanvas.width = 256;
+      roadTexCanvas.height = 256;
+      const rctx = roadTexCanvas.getContext('2d');
+      // Asphalt
+      rctx.fillStyle = '#1e293b';
+      rctx.fillRect(0, 0, 256, 256);
+      // Left & Right Alternating Rumble Curbs
+      rctx.fillStyle = '#f97316';
+      rctx.fillRect(0, 0, 14, 128);
+      rctx.fillRect(242, 0, 14, 128);
+      rctx.fillStyle = '#f8fafc';
+      rctx.fillRect(0, 128, 14, 128);
+      rctx.fillRect(242, 128, 14, 128);
+      // Dashed Center Line
+      rctx.fillStyle = '#facc15';
+      rctx.fillRect(124, 24, 8, 110);
+
+      roadTexture = new THREE.CanvasTexture(roadTexCanvas);
+      roadTexture.wrapS = THREE.RepeatWrapping;
+      roadTexture.wrapT = THREE.RepeatWrapping;
+      roadTexture.repeat.set(1, 24);
+
+      // Road Geometry Ribbon spanning from z = +10 to z = -230
+      const roadLength = 240;
+      const roadSegments = 80;
+      const roadWidth = 7.5;
+
+      const roadGeo = new THREE.PlaneGeometry(roadWidth, roadLength, 1, roadSegments);
+      roadGeo.rotateX(-Math.PI / 2);
+      roadGeo.translate(0, 0, -110); // Center from +10 to -230 along -Z
+      roadGeo.userData = {
+        basePositions: new Float32Array(roadGeo.attributes.position.array)
+      };
+
+      const roadMat = new THREE.MeshLambertMaterial({
+        map: roadTexture,
+        side: THREE.DoubleSide
+      });
+      roadMesh = new THREE.Mesh(roadGeo, roadMat);
+      scene.add(roadMesh);
+
+      // Trees along hillsides
+      treesGroup = new THREE.Group();
+      const treeTrunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 1.8, 6);
+      const treeTrunkMat = new THREE.MeshLambertMaterial({ color: 0x451a03 });
+      const treeConeGeo1 = new THREE.ConeGeometry(1.6, 3.2, 7);
+      const treeConeGeo2 = new THREE.ConeGeometry(1.2, 2.5, 7);
+      const treeFoliageMat1 = new THREE.MeshLambertMaterial({ color: 0x166534 });
+      const treeFoliageMat2 = new THREE.MeshLambertMaterial({ color: 0x15803d });
+
+      for (let i = 0; i < 48; i++) {
+        const tree = new THREE.Group();
+        const trunk = new THREE.Mesh(treeTrunkGeo, treeTrunkMat);
+        trunk.position.y = 0.9;
+        const c1 = new THREE.Mesh(treeConeGeo1, treeFoliageMat1);
+        c1.position.y = 2.4;
+        const c2 = new THREE.Mesh(treeConeGeo2, treeFoliageMat2);
+        c2.position.y = 3.6;
+        tree.add(trunk, c1, c2);
+
+        tree.userData = {
+          baseDist: i * 5.0,
+          side: (i % 2 === 0 ? 1 : -1),
+          lateral: 5.5 + (i % 7) * 2.8
+        };
+        treesGroup.add(tree);
       }
-      ctx.lineTo(w, safeHorizon);
-      ctx.closePath();
-      ctx.fill();
+      scene.add(treesGroup);
+
+      // Distance Arch Banner Gate (Every 500m)
+      archMesh = new THREE.Group();
+      const archPillarGeo = new THREE.BoxGeometry(0.4, 5.0, 0.4);
+      const archBeamGeo = new THREE.BoxGeometry(roadWidth + 1.2, 0.7, 0.5);
+      const archSignGeo = new THREE.BoxGeometry(roadWidth * 0.7, 0.8, 0.08);
+      const archOrangeMat = new THREE.MeshLambertMaterial({ color: 0xf97316 });
+
+      const archSignCanvas = document.createElement('canvas');
+      archSignCanvas.width = 512;
+      archSignCanvas.height = 128;
+      archSignCtx = archSignCanvas.getContext('2d');
+      archSignTexture = new THREE.CanvasTexture(archSignCanvas);
+      updateArchSignText(archSignCtx, archSignTexture, '0.5 KM');
+
+      const archSignMat = new THREE.MeshBasicMaterial({ map: archSignTexture });
+
+      const leftP = new THREE.Mesh(archPillarGeo, archOrangeMat);
+      leftP.position.set(-roadWidth * 0.5 - 0.2, 2.5, 0);
+      const rightP = new THREE.Mesh(archPillarGeo, archOrangeMat);
+      rightP.position.set(roadWidth * 0.5 + 0.2, 2.5, 0);
+      const beam = new THREE.Mesh(archBeamGeo, archOrangeMat);
+      beam.position.set(0, 4.8, 0);
+      const sign = new THREE.Mesh(archSignGeo, archSignMat);
+      sign.position.set(0, 4.2, 0);
+
+      archMesh.add(leftP, rightP, beam, sign);
+      archMesh.userData = { currentKm: 500 };
+      archMesh.visible = false;
+      scene.add(archMesh);
     }
 
-    function drawTree(x, y, scale) {
-      const trunkW = Math.max(2, 6 * scale);
-      const trunkH = Math.max(4, 18 * scale);
-      ctx.fillStyle = '#451a03';
-      ctx.fillRect(x - trunkW * 0.5, y - trunkH, trunkW, trunkH);
-
-      const coneW = Math.max(8, 36 * scale);
-      const coneH = Math.max(16, 68 * scale);
-      ctx.fillStyle = '#166534';
-      ctx.beginPath();
-      ctx.moveTo(x, y - trunkH - coneH);
-      ctx.lineTo(x - coneW * 0.5, y - trunkH);
-      ctx.lineTo(x + coneW * 0.5, y - trunkH);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    function drawArchBanner(x, y, roadHalfW, scale, kmText) {
-      const pillarW = Math.max(3, 10 * scale);
-      const archH = Math.max(18, 95 * scale);
-      ctx.fillStyle = '#f97316';
-      ctx.fillRect(x - roadHalfW - pillarW, y - archH, pillarW, archH);
-      ctx.fillRect(x + roadHalfW, y - archH, pillarW, archH);
-
-      const bannerH = Math.max(8, 24 * scale);
+    function updateArchSignText(ctx, tex, text) {
+      if (!ctx || !tex) return;
       ctx.fillStyle = '#18181b';
-      ctx.fillRect(x - roadHalfW - pillarW, y - archH, roadHalfW * 2 + pillarW * 2, bannerH);
+      ctx.fillRect(0, 0, 512, 128);
       ctx.strokeStyle = '#f97316';
-      ctx.lineWidth = Math.max(1, 2 * scale);
-      ctx.strokeRect(x - roadHalfW - pillarW, y - archH, roadHalfW * 2 + pillarW * 2, bannerH);
-
-      if (scale > 0.25) {
-        ctx.fillStyle = '#f4f4f5';
-        ctx.font = 'bold ' + Math.round(13 * scale) + 'px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(kmText, x, y - archH + bannerH * 0.72);
-      }
-    }
-
-    function fillRoundedRect(targetCtx, x, y, w, h, r) {
-      targetCtx.beginPath();
-      if (typeof targetCtx.roundRect === 'function') {
-        targetCtx.roundRect(x, y, w, h, r);
-      } else {
-        targetCtx.rect(x, y, w, h);
-      }
-      targetCtx.fill();
-    }
-
-    function drawCyclistAvatar(cx, cy, scale, crankAngle, leanRad, isRider, color, label) {
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(leanRad * 0.12);
-      ctx.scale(scale, scale);
-
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      ctx.beginPath();
-      ctx.ellipse(0, 2, 26, 7, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = '#e4e4e7';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.ellipse(0, -24, 7, 24, 0, 0, Math.PI * 2);
-      ctx.stroke();
-
-      const leftPedalY = -28 + Math.sin(crankAngle) * 12;
-      const rightPedalY = -28 + Math.sin(crankAngle + Math.PI) * 12;
-      const hipY = -66;
-
-      ctx.strokeStyle = '#d4d4d8';
-      ctx.lineWidth = 5.5;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(-11, hipY);
-      ctx.lineTo(-14, (hipY + leftPedalY) * 0.5 - 4);
-      ctx.lineTo(-11, leftPedalY);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(11, hipY);
-      ctx.lineTo(14, (hipY + rightPedalY) * 0.5 - 4);
-      ctx.lineTo(11, rightPedalY);
-      ctx.stroke();
-
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 4.5;
-      ctx.beginPath();
-      ctx.moveTo(0, -24);
-      ctx.lineTo(0, -64);
-      ctx.moveTo(-14, -54);
-      ctx.lineTo(14, -54);
-      ctx.stroke();
-
-      const bobOffset = state.watts > 250 && isRider ? Math.sin(crankAngle * 2) * 2.5 : 0;
-      ctx.fillStyle = color;
-      fillRoundedRect(ctx, -14, -96 + bobOffset, 28, 34, 8);
-
+      ctx.lineWidth = 6;
+      ctx.strokeRect(6, 6, 500, 116);
       ctx.fillStyle = '#f4f4f5';
-      ctx.beginPath();
-      ctx.arc(0, -108 + bobOffset, 10, 0, Math.PI * 2);
-      ctx.fill();
-
-      if (label) {
-        ctx.fillStyle = 'rgba(9, 9, 11, 0.85)';
-        ctx.fillRect(-52, -138, 104, 18);
-        ctx.fillStyle = '#f4f4f5';
-        ctx.font = 'bold 10px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(label, 0, -125);
-      }
-
-      ctx.restore();
+      ctx.font = 'bold 56px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(text, 256, 84);
+      tex.needsUpdate = true;
     }
 
-    function render(now) {
+    // Procedural Low-Poly Bicycle & Articulated Cyclist
+    function createBicycleAndCyclist() {
+      bikeGroup = new THREE.Group();
+
+      const frameMat = new THREE.MeshLambertMaterial({ color: 0xf97316 }); // Velodrome Orange
+      const metalMat = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, roughness: 0.35, metalness: 0.7 });
+      const tireMat = new THREE.MeshLambertMaterial({ color: 0x18181b });
+      const skinMat = new THREE.MeshLambertMaterial({ color: 0xfde047 });
+      const kitMat = new THREE.MeshLambertMaterial({ color: 0xf97316 }); // Rider Jersey
+      const helmetMat = new THREE.MeshLambertMaterial({ color: 0xf4f4f5 }); // Aero Helmet
+
+      // Wheels in YZ plane with spokes
+      const wheelGeo = new THREE.TorusGeometry(0.35, 0.035, 8, 24);
+      wheelGeo.rotateY(Math.PI / 2);
+      const spokeGeo = new THREE.CylinderGeometry(0.006, 0.006, 0.68, 6);
+
+      function buildWheelMesh() {
+        const wg = new THREE.Group();
+        wg.add(new THREE.Mesh(wheelGeo, tireMat));
+        const s1 = new THREE.Mesh(spokeGeo, metalMat);
+        const s2 = new THREE.Mesh(spokeGeo, metalMat);
+        s2.rotation.x = Math.PI / 2;
+        wg.add(s1, s2);
+        return wg;
+      }
+
+      rearWheel = buildWheelMesh();
+      rearWheel.position.set(0, 0.35, -0.5);
+      frontWheel = buildWheelMesh();
+      frontWheel.position.set(0, 0.35, 0.55);
+
+      // Frame Tubes
+      const tubeGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.65, 6);
+      tubeGeo.rotateZ(Math.PI / 2);
+
+      const topTube = new THREE.Mesh(tubeGeo, frameMat);
+      topTube.position.set(0, 0.65, 0.05);
+      topTube.rotation.x = 0.08;
+
+      const downTube = new THREE.Mesh(tubeGeo, frameMat);
+      downTube.position.set(0, 0.45, 0.1);
+      downTube.rotation.x = -0.7;
+
+      const seatTube = new THREE.Mesh(tubeGeo, frameMat);
+      seatTube.position.set(0, 0.5, -0.15);
+      seatTube.rotation.x = 0.35;
+
+      const saddleGeo = new THREE.BoxGeometry(0.12, 0.04, 0.22);
+      const saddle = new THREE.Mesh(saddleGeo, tireMat);
+      saddle.position.set(0, 0.74, -0.18);
+
+      const handleGeo = new THREE.BoxGeometry(0.38, 0.04, 0.08);
+      const handlebars = new THREE.Mesh(handleGeo, metalMat);
+      handlebars.position.set(0, 0.76, 0.48);
+
+      // Crank & Pedals
+      crankGroup = new THREE.Group();
+      crankGroup.position.set(0, 0.33, -0.12);
+      const crankAxle = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.22, 6), metalMat);
+      crankAxle.rotation.z = Math.PI / 2;
+      const crankArmGeo = new THREE.BoxGeometry(0.025, 0.14, 0.015);
+      const leftArm = new THREE.Mesh(crankArmGeo, metalMat);
+      leftArm.position.set(-0.11, 0.05, 0);
+      const rightArm = new THREE.Mesh(crankArmGeo, metalMat);
+      rightArm.position.set(0.11, -0.05, 0);
+      crankGroup.add(crankAxle, leftArm, rightArm);
+
+      bikeGroup.add(rearWheel, frontWheel, topTube, downTube, seatTube, saddle, handlebars, crankGroup);
+
+      // Articulated Rider
+      cyclistGroup = new THREE.Group();
+
+      // Torso
+      const torsoGeo = new THREE.BoxGeometry(0.28, 0.42, 0.18);
+      const torso = new THREE.Mesh(torsoGeo, kitMat);
+      torso.position.set(0, 0.96, 0.04);
+      torso.rotation.x = 0.52; // Tucked aggressive riding posture
+
+      // Head & Aero Helmet
+      const headGeo = new THREE.SphereGeometry(0.11, 10, 8);
+      const head = new THREE.Mesh(headGeo, skinMat);
+      head.position.set(0, 1.18, 0.24);
+
+      const helmetGeo = new THREE.ConeGeometry(0.13, 0.26, 8);
+      helmetGeo.rotateX(-Math.PI / 2);
+      const helmet = new THREE.Mesh(helmetGeo, helmetMat);
+      helmet.position.set(0, 1.23, 0.22);
+
+      // Arms reaching down to drops
+      const armGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.44, 6);
+      const leftArmMesh = new THREE.Mesh(armGeo, kitMat);
+      leftArmMesh.position.set(-0.16, 0.92, 0.26);
+      leftArmMesh.rotation.set(0.6, 0, 0.2);
+
+      const rightArmMesh = new THREE.Mesh(armGeo, kitMat);
+      rightArmMesh.position.set(0.16, 0.92, 0.26);
+      rightArmMesh.rotation.set(0.6, 0, -0.2);
+
+      // Articulated Thighs & Calves
+      const legGeo = new THREE.CylinderGeometry(0.045, 0.035, 0.34, 6);
+      leftLegGroup = new THREE.Group();
+      leftLegGroup.position.set(-0.13, 0.74, -0.12);
+      const leftThigh = new THREE.Mesh(legGeo, kitMat);
+      leftThigh.position.set(0, -0.15, 0.08);
+      leftThigh.rotation.x = 0.5;
+      leftLegGroup.add(leftThigh);
+
+      rightLegGroup = new THREE.Group();
+      rightLegGroup.position.set(0.13, 0.74, -0.12);
+      const rightThigh = new THREE.Mesh(legGeo, kitMat);
+      rightThigh.position.set(0, -0.15, 0.08);
+      rightThigh.rotation.x = 0.5;
+      rightLegGroup.add(rightThigh);
+
+      cyclistGroup.add(torso, head, helmet, leftArmMesh, rightArmMesh, leftLegGroup, rightLegGroup);
+      bikeGroup.add(cyclistGroup);
+
+      // Rotate bikeGroup by Math.PI so it faces -Z (Forward ahead of rider)
+      bikeGroup.rotation.y = Math.PI;
+      bikeGroup.position.set(0, 0, 0);
+      scene.add(bikeGroup);
+    }
+
+    // AI Pacer Bots in 3D
+    function createBotPacers() {
+      botsGroup = new THREE.Group();
+
+      const botWheelGeo = new THREE.TorusGeometry(0.3, 0.03, 6, 14);
+      botWheelGeo.rotateY(Math.PI / 2);
+
+      for (let b = 0; b < bots.length; b++) {
+        const botData = bots[b];
+        const botMesh = new THREE.Group();
+
+        const botBody = new THREE.Group();
+        const botMat = new THREE.MeshLambertMaterial({ color: botData.color });
+        const botDark = new THREE.MeshLambertMaterial({ color: 0x18181b });
+
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.35, 0.9), botMat);
+        frame.position.y = 0.45;
+        const w1 = new THREE.Mesh(botWheelGeo, botDark);
+        w1.position.set(0, 0.32, -0.4);
+        const w2 = new THREE.Mesh(botWheelGeo, botDark);
+        w2.position.set(0, 0.32, 0.45);
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.38, 0.16), botMat);
+        torso.position.set(0, 0.88, 0.02);
+        torso.rotation.x = 0.5;
+        const helm = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 6), new THREE.MeshLambertMaterial({ color: 0xf4f4f5 }));
+        helm.position.set(0, 1.12, 0.2);
+
+        botBody.add(frame, w1, w2, torso, helm);
+        botBody.rotation.y = Math.PI; // Face -Z
+        botMesh.add(botBody);
+
+        // 3D Floating Nametag Sprite (Faces camera directly)
+        const tagCanvas = document.createElement('canvas');
+        tagCanvas.width = 256;
+        tagCanvas.height = 64;
+        const tagCtx = tagCanvas.getContext('2d');
+        tagCtx.fillStyle = 'rgba(9, 9, 11, 0.86)';
+        tagCtx.fillRect(4, 8, 248, 48);
+        tagCtx.strokeStyle = botData.color;
+        tagCtx.lineWidth = 2.5;
+        tagCtx.strokeRect(4, 8, 248, 48);
+        tagCtx.fillStyle = '#f4f4f5';
+        tagCtx.font = 'bold 18px sans-serif';
+        tagCtx.textAlign = 'center';
+        tagCtx.fillText(botData.name, 128, 40);
+
+        const tagTex = new THREE.CanvasTexture(tagCanvas);
+        const tagSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tagTex, transparent: true }));
+        tagSprite.position.set(0, 1.6, 0);
+        tagSprite.scale.set(1.4, 0.35, 1);
+
+        botMesh.add(tagSprite);
+        botMesh.userData = { botIndex: b };
+        botsGroup.add(botMesh);
+      }
+      scene.add(botsGroup);
+    }
+
+    // ===============================================
+    // CURVED HOLOGRAPHIC FIGHTER-JET VISOR HUD (3D)
+    // ===============================================
+    function createCurvedVisorHud() {
+      hudCanvas = document.createElement('canvas');
+      hudCanvas.width = 1600;
+      hudCanvas.height = 800;
+      hudCanvas.style.fontVariantNumeric = 'tabular-nums';
+      hudCtx = hudCanvas.getContext('2d');
+
+      hudTexture = new THREE.CanvasTexture(hudCanvas);
+      hudTexture.minFilter = THREE.LinearFilter;
+      hudTexture.magFilter = THREE.LinearFilter;
+
+      // Curved Visor Cylinder: Radius 1.75m, Height 1.05m, subtending ~79 degrees
+      const visorRadius = 1.75;
+      const visorHeight = 1.05;
+      const visorArc = Math.PI * 0.44; // ~79 degrees
+      const visorGeo = new THREE.CylinderGeometry(
+        visorRadius, visorRadius, visorHeight, 40, 1, true,
+        -visorArc / 2, visorArc
+      );
+      // Flip Z so inner concave face curves in front of the camera at z = -1.75 without flipping X
+      visorGeo.scale(1, 1, -1);
+
+      const visorMat = new THREE.MeshBasicMaterial({
+        map: hudTexture,
+        transparent: true,
+        opacity: 0.96,
+        side: THREE.DoubleSide,
+        depthTest: false,
+        depthWrite: false
+      });
+
+      visorMesh = new THREE.Mesh(visorGeo, visorMat);
+      visorMesh.renderOrder = 999;
+      visorMesh.position.set(0, 0, 0);
+      visorMesh.rotation.set(0, 0, 0);
+      // Parent directly to camera so it remains centered in view across CHASE, POV, DRONE
+      camera.add(visorMesh);
+    }
+
+    // High-DPI 2D Visor HUD Painter
+    function renderVisorHud(now) {
+      if (!hudCtx) return;
+      const w = hudCanvas.width;
+      const h = hudCanvas.height;
+
+      hudCtx.clearRect(0, 0, w, h);
+
+      // Determine active zone color & accent
+      const pColor = ZONE_COLORS[state.powerZone] || '#F97316';
+      const hrColor = ZONE_COLORS[state.hrZone] || '#FB7185';
+      const pZoneName = ZONE_NAMES[state.powerZone] || 'Z3 TEMPO';
+
+      // 1. Subtle Holographic Visor Frame / Outer Reticle
+      hudCtx.save();
+      hudCtx.lineWidth = 1.5;
+      hudCtx.strokeStyle = 'rgba(148, 163, 184, 0.22)';
+
+      // Outer visor border brackets
+      hudCtx.beginPath();
+      // Top-left bracket
+      hudCtx.moveTo(40, 90);
+      hudCtx.lineTo(40, 40);
+      hudCtx.lineTo(240, 40);
+      // Top-right bracket
+      hudCtx.moveTo(w - 240, 40);
+      hudCtx.lineTo(w - 40, 40);
+      hudCtx.lineTo(w - 40, 90);
+      // Bottom brackets
+      hudCtx.moveTo(40, h - 90);
+      hudCtx.lineTo(40, h - 40);
+      hudCtx.lineTo(240, h - 40);
+      hudCtx.moveTo(w - 240, h - 40);
+      hudCtx.lineTo(w - 40, h - 40);
+      hudCtx.lineTo(w - 40, h - 90);
+      hudCtx.stroke();
+
+      // Subtle ambient zone glow on visor top edge
+      const edgeGrad = hudCtx.createLinearGradient(0, 0, 0, 80);
+      edgeGrad.addColorStop(0, pColor);
+      edgeGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      hudCtx.fillStyle = edgeGrad;
+      hudCtx.globalAlpha = 0.18;
+      hudCtx.fillRect(100, 30, w - 200, 50);
+      hudCtx.globalAlpha = 1.0;
+      hudCtx.restore();
+
+      // 2. CENTER RETICLE: Radial Power Tachometer & Speed Readout
+      const cx = w * 0.5;
+      const cy = h * 0.48;
+      const arcRadius = 145;
+
+      // Tachometer background track
+      hudCtx.save();
+      hudCtx.beginPath();
+      hudCtx.arc(cx, cy, arcRadius, Math.PI * 0.8, Math.PI * 2.2, false);
+      hudCtx.lineWidth = 12;
+      hudCtx.strokeStyle = 'rgba(39, 39, 42, 0.65)';
+      hudCtx.lineCap = 'round';
+      hudCtx.stroke();
+
+      // Dynamic Active Watts Arc
+      const maxDisplayWatts = Math.max(450, state.ftpWatts * 1.5);
+      const powerFraction = Math.min(1.0, Math.max(0.0, state.watts / maxDisplayWatts));
+      const endAngle = Math.PI * 0.8 + (Math.PI * 1.4) * powerFraction;
+
+      hudCtx.beginPath();
+      hudCtx.arc(cx, cy, arcRadius, Math.PI * 0.8, endAngle, false);
+      hudCtx.lineWidth = 14;
+      hudCtx.strokeStyle = pColor;
+      hudCtx.shadowColor = pColor;
+      hudCtx.shadowBlur = 18;
+      hudCtx.stroke();
+      hudCtx.restore();
+
+      // Inner Tick marks & Horizon crosshairs
+      hudCtx.save();
+      hudCtx.strokeStyle = 'rgba(244, 244, 245, 0.35)';
+      hudCtx.lineWidth = 1;
+      hudCtx.beginPath();
+      hudCtx.moveTo(cx - 50, cy);
+      hudCtx.lineTo(cx - 20, cy);
+      hudCtx.moveTo(cx + 20, cy);
+      hudCtx.lineTo(cx + 50, cy);
+      hudCtx.stroke();
+
+      // Center Big Readouts: Watts & Zone Pill
+      hudCtx.textAlign = 'center';
+      hudCtx.fillStyle = pColor;
+      hudCtx.font = '900 68px sans-serif';
+      hudCtx.shadowColor = pColor;
+      hudCtx.shadowBlur = 14;
+      hudCtx.fillText(String(state.watts), cx, cy - 8);
+      hudCtx.shadowBlur = 0;
+
+      hudCtx.fillStyle = '#F4F4F5';
+      hudCtx.font = 'bold 20px sans-serif';
+      hudCtx.fillText('WATTS', cx, cy + 24);
+
+      // Zone Pill
+      hudCtx.fillStyle = 'rgba(9, 9, 11, 0.82)';
+      hudCtx.fillRect(cx - 75, cy + 38, 150, 26);
+      hudCtx.strokeStyle = pColor;
+      hudCtx.lineWidth = 1.5;
+      hudCtx.strokeRect(cx - 75, cy + 38, 150, 26);
+      hudCtx.fillStyle = pColor;
+      hudCtx.font = 'bold 13px sans-serif';
+      hudCtx.fillText(pZoneName, cx, cy + 56);
+
+      // Speed Readout (Directly below tachometer)
+      hudCtx.fillStyle = '#FFFFFF';
+      hudCtx.font = '900 44px sans-serif';
+      hudCtx.fillText(state.speedKmh.toFixed(1), cx, cy + 130);
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 15px sans-serif';
+      hudCtx.fillText('KM / H', cx, cy + 154);
+
+      // 3. LEFT WING: Effort & Physiological Metrics
+      const leftX = 140;
+      const leftY = 120;
+      const wingW = 320;
+      const wingH = 460;
+
+      // Left Pod Glass Frame
+      hudCtx.fillStyle = 'rgba(9, 9, 11, 0.65)';
+      hudCtx.fillRect(leftX, leftY, wingW, wingH);
+      hudCtx.strokeStyle = 'rgba(39, 39, 42, 0.85)';
+      hudCtx.lineWidth = 1.5;
+      hudCtx.strokeRect(leftX, leftY, wingW, wingH);
+
+      // Corner accent in Zone color
+      hudCtx.fillStyle = pColor;
+      hudCtx.fillRect(leftX, leftY, 6, wingH);
+
+      // Left Header
+      hudCtx.textAlign = 'left';
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 13px sans-serif';
+      hudCtx.fillText('EFFORT & VITALS', leftX + 24, leftY + 36);
+
+      // Cadence (RPM)
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('CADENCE', leftX + 24, leftY + 85);
+      hudCtx.fillStyle = '#F4F4F5';
+      hudCtx.font = '900 42px sans-serif';
+      hudCtx.fillText(String(state.rpm), leftX + 24, leftY + 132);
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 15px sans-serif';
+      hudCtx.fillText('RPM', leftX + 115, leftY + 132);
+
+      // Cadence Mini Arc Bar
+      const rpmFraction = Math.min(1.0, state.rpm / 120);
+      hudCtx.fillStyle = 'rgba(39, 39, 42, 0.8)';
+      hudCtx.fillRect(leftX + 24, leftY + 148, wingW - 48, 8);
+      hudCtx.fillStyle = '#38BDF8';
+      hudCtx.fillRect(leftX + 24, leftY + 148, (wingW - 48) * rpmFraction, 8);
+
+      // Heart Rate (BPM) with cardiac pulse
+      const hrBpm = state.bpm > 0 ? state.bpm : '--';
+      const heartPulse = 1.0 + (Math.sin(now * 0.009) * 0.12);
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('HEART RATE', leftX + 24, leftY + 200);
+
+      hudCtx.save();
+      hudCtx.fillStyle = hrColor;
+      hudCtx.font = '900 42px sans-serif';
+      hudCtx.shadowColor = hrColor;
+      hudCtx.shadowBlur = 10;
+      hudCtx.fillText(String(hrBpm), leftX + 24, leftY + 248);
+      hudCtx.shadowBlur = 0;
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 15px sans-serif';
+      hudCtx.fillText('BPM', leftX + 120, leftY + 248);
+      hudCtx.restore();
+
+      // Cardiac rhythm waveform
+      hudCtx.strokeStyle = hrColor;
+      hudCtx.lineWidth = 2.5;
+      hudCtx.beginPath();
+      const waveStartX = leftX + 24;
+      const waveY = leftY + 276;
+      hudCtx.moveTo(waveStartX, waveY);
+      hudCtx.lineTo(waveStartX + 40, waveY);
+      hudCtx.lineTo(waveStartX + 55, waveY - 14 * heartPulse);
+      hudCtx.lineTo(waveStartX + 70, waveY + 12 * heartPulse);
+      hudCtx.lineTo(waveStartX + 85, waveY);
+      hudCtx.lineTo(waveStartX + wingW - 48, waveY);
+      hudCtx.stroke();
+
+      // W/KG & FTP
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('POWER / WEIGHT', leftX + 24, leftY + 330);
+      hudCtx.fillStyle = '#F4F4F5';
+      hudCtx.font = '900 34px sans-serif';
+      hudCtx.fillText(state.wattsPerKg.toFixed(1) + ' W/KG', leftX + 24, leftY + 372);
+
+      hudCtx.fillStyle = '#71717A';
+      hudCtx.font = 'bold 14px sans-serif';
+      hudCtx.fillText('TARGET FTP: ' + state.ftpWatts + ' W', leftX + 24, leftY + 415);
+
+      // 4. RIGHT WING: Navigation & Course Telemetry
+      const rightX = w - leftX - wingW;
+      const rightY = leftY;
+
+      // Right Pod Glass Frame
+      hudCtx.fillStyle = 'rgba(9, 9, 11, 0.65)';
+      hudCtx.fillRect(rightX, rightY, wingW, wingH);
+      hudCtx.strokeStyle = 'rgba(39, 39, 42, 0.85)';
+      hudCtx.lineWidth = 1.5;
+      hudCtx.strokeRect(rightX, rightY, wingW, wingH);
+
+      // Right Accent Bar
+      hudCtx.fillStyle = '#F97316';
+      hudCtx.fillRect(rightX + wingW - 6, rightY, 6, wingH);
+
+      // Right Header
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 13px sans-serif';
+      hudCtx.fillText('COURSE TELEMETRY', rightX + 24, rightY + 36);
+
+      // Distance
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('DISTANCE', rightX + 24, rightY + 85);
+      hudCtx.fillStyle = '#F4F4F5';
+      hudCtx.font = '900 42px sans-serif';
+      hudCtx.fillText((state.distanceMeters / 1000).toFixed(2), rightX + 24, rightY + 132);
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 15px sans-serif';
+      hudCtx.fillText('KM', rightX + 160, rightY + 132);
+
+      // Incline Grade (%)
+      const gradeColor = state.gradePercent > 4.0 ? '#F43F5E' : (state.gradePercent > 0.0 ? '#FBBF24' : '#34D399');
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('ROAD GRADE', rightX + 24, rightY + 200);
+      hudCtx.fillStyle = gradeColor;
+      hudCtx.font = '900 42px sans-serif';
+      const gradeSign = state.gradePercent >= 0 ? '+' : '';
+      hudCtx.fillText(gradeSign + state.gradePercent.toFixed(1) + '%', rightX + 24, rightY + 248);
+
+      // Elevation Profile Mini Ribbon
+      hudCtx.fillStyle = 'rgba(39, 39, 42, 0.7)';
+      hudCtx.fillRect(rightX + 24, rightY + 280, wingW - 48, 55);
+      hudCtx.strokeStyle = '#F97316';
+      hudCtx.lineWidth = 2.5;
+      hudCtx.beginPath();
+      const pX = rightX + 24;
+      const pY = rightY + 325;
+      hudCtx.moveTo(pX, pY);
+      hudCtx.lineTo(pX + 40, pY - 10);
+      hudCtx.lineTo(pX + 90, pY - 32);
+      hudCtx.lineTo(pX + 150, pY - 20);
+      hudCtx.lineTo(pX + 210, pY - 42);
+      hudCtx.lineTo(pX + wingW - 48, pY - 30);
+      hudCtx.stroke();
+
+      // Current Rider dot on profile
+      const profDotX = pX + ((state.distanceMeters % 4000) / 4000) * (wingW - 48);
+      hudCtx.fillStyle = '#FFFFFF';
+      hudCtx.beginPath();
+      hudCtx.arc(profDotX, pY - 24, 5, 0, Math.PI * 2);
+      hudCtx.fill();
+
+      // Elapsed Ride Time
+      const mins = Math.floor(state.elapsedSeconds / 60);
+      const secs = state.elapsedSeconds % 60;
+      const timeStr = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('ELAPSED TIME', rightX + 24, rightY + 375);
+      hudCtx.fillStyle = '#F4F4F5';
+      hudCtx.font = '900 32px sans-serif';
+      hudCtx.fillText(timeStr, rightX + 24, rightY + 415);
+
+      // 5. TOP HEADER ROUTE BADGE
+      hudCtx.textAlign = 'center';
+      hudCtx.fillStyle = 'rgba(9, 9, 11, 0.75)';
+      hudCtx.fillRect(cx - 210, 48, 420, 36);
+      hudCtx.strokeStyle = 'rgba(39, 39, 42, 0.9)';
+      hudCtx.lineWidth = 1.5;
+      hudCtx.strokeRect(cx - 210, 48, 420, 36);
+
+      // Live GPS Dot
+      hudCtx.fillStyle = '#34D399';
+      hudCtx.beginPath();
+      hudCtx.arc(cx - 186, 66, 5, 0, Math.PI * 2);
+      hudCtx.fill();
+
+      hudCtx.fillStyle = '#F4F4F5';
+      hudCtx.font = 'bold 14px sans-serif';
+      hudCtx.fillText(state.activeRouteName.toUpperCase(), cx + 10, 72);
+
+      hudCtx.restore();
+
+      // Signal Three.js that texture needs update
+      hudTexture.needsUpdate = true;
+    }
+
+    // ==========================================
+    // DYNAMIC WORLD & SCENERY DEFORMATION
+    // ==========================================
+    function updateWorldGeometry(localDist) {
+      // 1. Scroll Road Texture
+      if (roadTexture) {
+        roadTexture.offset.y = -(localDist * 0.1) % 1;
+      }
+
+      // 2. Deform Road Ribbon Vertices along -Z
+      if (roadMesh && roadMesh.geometry.userData.basePositions) {
+        const pos = roadMesh.geometry.attributes.position;
+        const base = roadMesh.geometry.userData.basePositions;
+        for (let i = 0; i < pos.count; i++) {
+          const bX = base[i * 3];
+          const bZ = base[i * 3 + 2];
+          const d = -bZ; // Distance ahead of rider along -Z
+          const relD = Math.max(0, d);
+          const curveOffset = (roadCurveAt(localDist + relD) - roadCurveAt(localDist)) * (relD / 35);
+          const slopeOffset = relD * (state.gradePercent * 0.006);
+          pos.setX(i, bX + curveOffset);
+          pos.setY(i, slopeOffset);
+        }
+        pos.needsUpdate = true;
+      }
+
+      // 3. Scroll Trees along -Z
+      if (treesGroup) {
+        for (let i = 0; i < treesGroup.children.length; i++) {
+          const tree = treesGroup.children[i];
+          const d = ((tree.userData.baseDist - (localDist % 240)) + 240) % 240 - 10;
+          const relD = Math.max(0, d);
+          const curveX = (roadCurveAt(localDist + relD) - roadCurveAt(localDist)) * (relD / 35);
+          const slopeY = relD * (state.gradePercent * 0.006);
+          tree.position.set(curveX + tree.userData.side * tree.userData.lateral, slopeY, -d);
+        }
+      }
+
+      // 4. Distance Milestone Arch Gate (Every 500m)
+      if (archMesh) {
+        const nextMilestone = Math.ceil((localDist + 5) / 500) * 500;
+        const d = nextMilestone - localDist;
+        if (d > 0 && d < 230) {
+          archMesh.visible = true;
+          const curveX = (roadCurveAt(localDist + d) - roadCurveAt(localDist)) * (d / 35);
+          const slopeY = d * (state.gradePercent * 0.006);
+          archMesh.position.set(curveX, slopeY, -d);
+          if (archMesh.userData.currentKm !== nextMilestone) {
+            archMesh.userData.currentKm = nextMilestone;
+            updateArchSignText(archSignCtx, archSignTexture, (nextMilestone / 1000).toFixed(1) + ' KM');
+          }
+        } else {
+          archMesh.visible = false;
+        }
+      }
+
+      // 5. Position AI Bots along -Z
+      if (botsGroup) {
+        const riderLoop = ((localDist % 4000) + 4000) % 4000;
+        for (let b = 0; b < botsGroup.children.length; b++) {
+          const botMesh = botsGroup.children[b];
+          const bData = bots[b];
+          let relDist = bData.dist - riderLoop;
+          if (relDist < -20) relDist += 4000;
+          if (relDist < 220) {
+            botMesh.visible = true;
+            const relD = Math.max(0, relDist);
+            const curveX = (roadCurveAt(localDist + relD) - roadCurveAt(localDist)) * (relD / 35);
+            const slopeY = relD * (state.gradePercent * 0.006);
+            botMesh.position.set(curveX + bData.laneOffset * 2.0, slopeY, -relDist);
+          } else {
+            botMesh.visible = false;
+          }
+        }
+      }
+    }
+
+    // ==========================================
+    // MAIN ANIMATION & RENDERING LOOP
+    // ==========================================
+    let lastTime = performance.now();
+    let cameraInertiaPitch = 0;
+    let cameraInertiaRoll = 0;
+
+    function animate(now) {
       try {
-        const dt = Math.min(0.1, Math.max(0, (now - lastTime) / 1000));
+        const dt = Math.min(0.1, Math.max(0.001, (now - lastTime) / 1000));
         lastTime = now;
 
-        const localDist = state.distanceMeters;
+        // Update physics calculations
+        const speedMs = (state.speedKmh * 1000) / 3600;
+        state.wheelRotationRad += (speedMs / 0.35) * dt;
         state.crankAngleRad += ((state.rpm / 60) * Math.PI * 2) * dt;
 
+        // Update AI Bot distances
         for (let i = 0; i < bots.length; i++) {
           bots[i].dist = (bots[i].dist + bots[i].speedMs * dt) % 4000;
         }
 
-        const w = canvas.width;
-        const h = canvas.height;
-
+        // If in MAP Mode, render the full 2D Tactical OpenStreetMap View
         if (state.cameraMode === 'MAP') {
-          renderGpsMap(ctx, 0, 0, w, h, 15);
-        } else {
-          const gradeShift = Math.max(-45, Math.min(45, state.gradePercent * 5.5));
-          const camHorizonFactor = state.cameraMode === 'DRONE' ? 0.32 : (state.cameraMode === 'POV' ? 0.48 : 0.42);
-          const horizonY = Math.max(20, Math.min(h - 20, h * camHorizonFactor - gradeShift));
+          threeCanvas.style.display = 'none';
+          fallback2dCanvas.style.display = 'block';
+          renderGpsMap(fallbackCtx, 0, 0, fallback2dCanvas.width, fallback2dCanvas.height, 15);
+        } else if (isThreeSupported) {
+          threeCanvas.style.display = 'block';
+          fallback2dCanvas.style.display = 'none';
 
-          const baseCurve = roadCurveAt(localDist);
-          drawSkyAndMountains(w, h, horizonY, baseCurve);
+          const localDist = state.distanceMeters;
+          const currentCurve = roadCurveAt(localDist);
+          const currentSlope = state.gradePercent * 0.05;
 
-          const groundGrad = ctx.createLinearGradient(0, horizonY, 0, h);
-          groundGrad.addColorStop(0, '#15803d');
-          groundGrad.addColorStop(1, '#14532d');
-          ctx.fillStyle = groundGrad;
-          ctx.fillRect(0, horizonY, w, h - horizonY);
-
-          const numSlices = 90;
-          const drawDistance = 140;
-          const segLength = 4;
-
-          for (let i = numSlices; i >= 1; i--) {
-            const zNear = ((i - 1) / numSlices) * drawDistance + 1.5;
-            const zFar = (i / numSlices) * drawDistance + 1.5;
-
-            const pNear = 1 / (zNear * 0.065);
-            const pFar = 1 / (zFar * 0.065);
-
-            const yNear = horizonY + (h - horizonY) * Math.min(1.2, pNear);
-            const yFar = horizonY + (h - horizonY) * Math.min(1.2, pFar);
-
-            const worldZNear = localDist + zNear;
-            const worldZFar = localDist + zFar;
-
-            const curveNear = (roadCurveAt(worldZNear) - baseCurve) * (1 - pNear) * (w * 0.22);
-            const curveFar = (roadCurveAt(worldZFar) - baseCurve) * (1 - pFar) * (w * 0.22);
-
-            const xNear = w * 0.5 + curveNear;
-            const xFar = w * 0.5 + curveFar;
-
-            const wNear = (w * 0.44) * pNear;
-            const wFar = (w * 0.44) * pFar;
-
-            const stripeIndex = Math.floor(worldZNear / segLength);
-            const isAlt = (stripeIndex % 2) === 0;
-
-            ctx.fillStyle = isAlt ? '#f97316' : '#f8fafc';
-            ctx.beginPath();
-            ctx.moveTo(xFar - wFar * 1.07, yFar);
-            ctx.lineTo(xFar + wFar * 1.07, yFar);
-            ctx.lineTo(xNear + wNear * 1.07, yNear);
-            ctx.lineTo(xNear - wNear * 1.07, yNear);
-            ctx.closePath();
-            ctx.fill();
-
-            ctx.fillStyle = isAlt ? '#334155' : '#475569';
-            ctx.beginPath();
-            ctx.moveTo(xFar - wFar, yFar);
-            ctx.lineTo(xFar + wFar, yFar);
-            ctx.lineTo(xNear + wNear, yNear);
-            ctx.lineTo(xNear - wNear, yNear);
-            ctx.closePath();
-            ctx.fill();
-
-            if (isAlt) {
-              ctx.fillStyle = '#facc15';
-              ctx.beginPath();
-              ctx.moveTo(xFar - wFar * 0.025, yFar);
-              ctx.lineTo(xFar + wFar * 0.025, yFar);
-              ctx.lineTo(xNear + wNear * 0.025, yNear);
-              ctx.lineTo(xNear - wNear * 0.025, yNear);
-              ctx.closePath();
-              ctx.fill();
-            }
-
-            if (stripeIndex % 4 === 0 && Math.floor(worldZFar / segLength) !== stripeIndex) {
-              const treeScale = Math.min(1.1, pNear * 0.9);
-              drawTree(xNear - wNear * 1.45, yNear, treeScale);
-              drawTree(xNear + wNear * 1.45, yNear, treeScale);
-            }
-
-            const bannerIdx = Math.floor(worldZNear / 500);
-            if (bannerIdx > 0 && Math.floor(worldZFar / 500) !== bannerIdx) {
-              const kmLabel = (bannerIdx * 0.5).toFixed(1) + ' KM';
-              drawArchBanner(xNear, yNear, wNear, Math.min(1.0, pNear), kmLabel);
-            }
-
-            for (let b = 0; b < bots.length; b++) {
-              const bot = bots[b];
-              const riderLoop = ((localDist % 4000) + 4000) % 4000;
-              let relZ = bot.dist - riderLoop;
-              if (relZ < 0) relZ += 4000;
-              if (relZ >= zNear && relZ < zFar && relZ < drawDistance) {
-                const botX = xNear + wNear * bot.laneOffset;
-                const botScale = Math.min(0.95, pNear * 0.85);
-                drawCyclistAvatar(
-                  botX,
-                  yNear,
-                  botScale,
-                  now * 0.009 + b,
-                  0,
-                  false,
-                  bot.color,
-                  bot.name
-                );
-              }
-            }
+          // 1. Update Cyclist and Bike
+          if (frontWheel && rearWheel) {
+            frontWheel.rotation.x = state.wheelRotationRad;
+            rearWheel.rotation.x = state.wheelRotationRad;
+          }
+          if (crankGroup) {
+            crankGroup.rotation.x = state.crankAngleRad;
+          }
+          if (leftLegGroup && rightLegGroup) {
+            leftLegGroup.rotation.x = Math.sin(state.crankAngleRad) * 0.45;
+            rightLegGroup.rotation.x = Math.sin(state.crankAngleRad + Math.PI) * 0.45;
+          }
+          if (bikeGroup) {
+            // Bike lean into corners (facing -Z)
+            const bikeLean = -currentCurve * 0.35;
+            bikeGroup.rotation.z = bikeLean;
+            bikeGroup.rotation.x = -currentSlope * 0.5;
+            bikeGroup.position.x = currentCurve * 0.35;
           }
 
-          if (state.cameraMode !== 'POV') {
-            const avatarScale = state.cameraMode === 'DRONE' ? 0.68 : 0.95;
-            const avatarY = state.cameraMode === 'DRONE' ? h * 0.80 : h * 0.86;
-            drawCyclistAvatar(
-              w * 0.5,
-              avatarY,
-              avatarScale,
-              state.crankAngleRad,
-              baseCurve * 0.35,
-              true,
-              '#f97316',
-              null
-            );
+          // 2. Deform Road & Scroll Scenery along -Z
+          updateWorldGeometry(localDist);
+
+          // 3. Update Camera Modes & Dynamic Inertia (Camera points toward -Z)
+          const targetPitch = -currentSlope * 0.4;
+          const targetRoll = -currentCurve * 0.15;
+          cameraInertiaPitch += (targetPitch - cameraInertiaPitch) * 4.0 * dt;
+          cameraInertiaRoll += (targetRoll - cameraInertiaRoll) * 4.0 * dt;
+
+          if (state.cameraMode === 'POV') {
+            // First-person cockpit: looking forward over the drops toward -Z
+            cameraRig.position.set(bikeGroup.position.x, 1.35, -0.15);
+            camera.position.set(0, 0, 0);
+            camera.rotation.set(cameraInertiaPitch, 0, cameraInertiaRoll);
+          } else if (state.cameraMode === 'DRONE') {
+            // Elevated overview behind (+Z) looking down forward (-Z)
+            cameraRig.position.set(bikeGroup.position.x * 0.6, 4.8, 8.5);
+            camera.position.set(0, 0, 0);
+            camera.rotation.set(-0.32 + cameraInertiaPitch * 0.5, 0, cameraInertiaRoll * 0.5);
           } else {
-            ctx.strokeStyle = '#3f3f46';
-            ctx.lineWidth = 10;
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.moveTo(w * 0.36, h * 0.96);
-            ctx.quadraticCurveTo(w * 0.5, h * 0.88, w * 0.64, h * 0.96);
-            ctx.stroke();
+            // Default CHASE Mode: Behind (+Z) and slightly above rider at z = 0, looking toward -Z
+            cameraRig.position.set(bikeGroup.position.x * 0.75, 1.85, 3.8);
+            camera.position.set(0, 0, 0);
+            camera.rotation.set(-0.10 + cameraInertiaPitch, 0, cameraInertiaRoll);
           }
+
+          // Subtle visor inertia lag relative to camera
+          if (visorMesh) {
+            visorMesh.visible = true;
+            visorMesh.position.set(-cameraInertiaRoll * 0.06, cameraInertiaPitch * 0.05, 0);
+            visorMesh.rotation.set(0, 0, -cameraInertiaRoll * 0.2);
+          }
+
+          // 4. Update Visor HUD Canvas Texture
+          renderVisorHud(now);
+
+          // 5. Render Three.js Scene
+          renderer.render(scene, camera);
         }
 
-        // Render Full-Screen Interactive Online Map when modal is open
+        // Modal map if open
         if (state.isMapModalOpen) {
           renderGpsMap(fullMapCtx, 0, 0, fullMapCanvas.width, fullMapCanvas.height, 15);
         }
+      } catch (err) {
+        console.error('Render error:', err);
       } finally {
-        requestAnimationFrame(render);
+        requestAnimationFrame(animate);
       }
     }
 
-    requestAnimationFrame(render);
+    function resize() {
+      const w = window.innerWidth || document.documentElement.clientWidth || 800;
+      const h = window.innerHeight || document.documentElement.clientHeight || 450;
+
+      fallback2dCanvas.width = w;
+      fallback2dCanvas.height = h;
+
+      if (renderer && camera) {
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      }
+
+      if (state.isMapModalOpen) {
+        fullMapCanvas.width = Math.max(240, fullMapContainer.clientWidth || (w - 340));
+        fullMapCanvas.height = Math.max(160, fullMapContainer.clientHeight || (h - 200));
+      }
+    }
+
+    // Single Guarded Bootstrap
+    let hasBootstrapped = false;
+    function bootstrap() {
+      if (hasBootstrapped) return;
+      hasBootstrapped = true;
+      initThree();
+      resize();
+      requestAnimationFrame(animate);
+    }
+
+    window.addEventListener('resize', resize);
+    if (document.readyState === 'loading') {
+      window.addEventListener('DOMContentLoaded', bootstrap);
+    } else {
+      bootstrap();
+    }
   </script>
 </body>
 </html>
