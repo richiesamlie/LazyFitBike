@@ -63,7 +63,7 @@ data class RideUiState(
     val isMapModalOpen: Boolean = false,
     val isStravaModalOpen: Boolean = false,
     val isUpdateModalOpen: Boolean = false,
-    val installedVersionName: String = "v1.3.0",
+    val installedVersionName: String = "v1.3.1",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
@@ -137,9 +137,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     private fun resolveInstalledVersion(app: Application): String {
         return runCatching {
             val info = app.packageManager.getPackageInfo(app.packageName, 0)
-            val vName = info.versionName ?: "1.3.0"
+            val vName = info.versionName ?: "1.3.1"
             if (vName.startsWith("v")) vName else "v$vName"
-        }.getOrDefault("v1.3.0")
+        }.getOrDefault("v1.3.1")
     }
 
     init {
@@ -512,10 +512,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val cached = java.io.File(java.io.File(context.cacheDir, "updates"), "LazyFitBike-watch.apk")
             if (cached.exists() && cached.length() > 0L) {
-                val localUrl = GithubUpdater.startLocalWatchApkServer(cached)
                 val msg = GithubUpdater.shareWatchApkFile(context, cached)
                 _uiState.value = _uiState.value.copy(
-                    updateStatusMessage = "$msg Local Watch Wi-Fi URL: $localUrl"
+                    updateStatusMessage = msg
                 )
                 return@launch
             }
@@ -532,7 +531,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             }
             _uiState.value = _uiState.value.copy(
                 updateDownloadProgress = 0,
-                updateStatusMessage = "Downloading LazyFitBike-watch.apk for Share & Wi-Fi Server..."
+                updateStatusMessage = "Downloading LazyFitBike-watch.apk for Share Sheet..."
             )
             val file = GithubUpdater.downloadApkToFile(
                 context = context,
@@ -543,11 +542,10 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                 }
             )
             if (file != null) {
-                val localUrl = GithubUpdater.startLocalWatchApkServer(file)
                 val msg = GithubUpdater.shareWatchApkFile(context, file)
                 _uiState.value = _uiState.value.copy(
                     updateDownloadProgress = 100,
-                    updateStatusMessage = "$msg Local Watch Wi-Fi URL: $localUrl"
+                    updateStatusMessage = msg
                 )
             }
         }

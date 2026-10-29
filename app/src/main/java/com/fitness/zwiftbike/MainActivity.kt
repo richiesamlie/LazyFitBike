@@ -876,7 +876,7 @@ fun VeloPulseCockpitScreen(
                             )
                         ) {
                             Text(
-                                text = "Download & Push Watch APK (BT + Local Wi-Fi Server)",
+                                text = "Download & Push Watch APK via Bluetooth",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )

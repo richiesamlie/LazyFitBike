@@ -11,8 +11,7 @@ import java.io.File
 /**
  * Background WearableListenerService that wakes up the Galaxy Watch 4 app
  * whenever the phone opens a Bluetooth ChannelClient stream ("/velopulse/watch_apk_update")
- * or sends control/ping messages ("/velopulse/ping", "/velopulse/control"), preventing
- * Google Play Services StatusCode 15 (TIMEOUT) when the watch app is in the background.
+ * or sends control/ping messages ("/velopulse/ping", "/velopulse/control").
  */
 class WearOtaListenerService : WearableListenerService() {
 
@@ -20,8 +19,9 @@ class WearOtaListenerService : WearableListenerService() {
         super.onMessageReceived(event)
         when (event.path) {
             "/velopulse/ping" -> {
+                val ver = WatchGithubUpdater.resolveInstalledVersion(this)
                 Wearable.getMessageClient(this)
-                    .sendMessage(event.sourceNodeId, "/velopulse/pong", "v1.3.0".toByteArray(Charsets.UTF_8))
+                    .sendMessage(event.sourceNodeId, "/velopulse/pong", ver.toByteArray(Charsets.UTF_8))
             }
             "/velopulse/control" -> {
                 val cmd = String(event.data, Charsets.UTF_8).trim().uppercase()
@@ -40,6 +40,13 @@ class WearOtaListenerService : WearableListenerService() {
         if (channel.path == WatchGithubUpdater.WATCH_APK_CHANNEL_PATH) {
             val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
             val destFile = File(updatesDir, "LazyFitBike-watch-bt.apk")
+            WatchGithubUpdater.statusFlow.value = "Receiving BT APK..."
+            runCatching {
+                val wakeIntent = Intent(this, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                }
+                startActivity(wakeIntent)
+            }
             Wearable.getChannelClient(this)
                 .receiveFile(channel, Uri.fromFile(destFile), false)
         }
@@ -55,7 +62,8 @@ class WearOtaListenerService : WearableListenerService() {
             val updatesDir = File(cacheDir, "updates")
             val readyFile = File(updatesDir, "LazyFitBike-watch-bt.apk")
             if (readyFile.exists() && readyFile.length() > 0L) {
-                WatchGithubUpdater.promptInstallWatchApk(this, readyFile)
+                val status = WatchGithubUpdater.promptInstallWatchApk(this, readyFile)
+                WatchGithubUpdater.statusFlow.value = status
             }
         }
     }

@@ -46,7 +46,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.Wearable
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.roundToInt
@@ -57,7 +56,6 @@ import kotlin.math.roundToInt
  */
 class MainActivity : ComponentActivity() {
 
-    private val updateStatusFlow = MutableStateFlow("OTA Update")
     private var incomingWatchApkFile: File? = null
 
     private val channelCallback = object : ChannelClient.ChannelCallback() {
@@ -66,7 +64,7 @@ class MainActivity : ComponentActivity() {
                 val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
                 val destFile = File(updatesDir, "LazyFitBike-watch-bt.apk")
                 incomingWatchApkFile = destFile
-                updateStatusFlow.value = "Receiving BT APK..."
+                WatchGithubUpdater.statusFlow.value = "Receiving BT APK..."
                 Wearable.getChannelClient(this@MainActivity)
                     .receiveFile(channel, Uri.fromFile(destFile), false)
             }
@@ -80,9 +78,9 @@ class MainActivity : ComponentActivity() {
             if (channel.path == WatchGithubUpdater.WATCH_APK_CHANNEL_PATH) {
                 val readyFile = incomingWatchApkFile
                 if (readyFile != null && readyFile.exists() && readyFile.length() > 0L) {
-                    updateStatusFlow.value = "BT APK Ready: Install"
+                    WatchGithubUpdater.statusFlow.value = "BT APK Ready: Install"
                     val msg = WatchGithubUpdater.promptInstallWatchApk(this@MainActivity, readyFile)
-                    updateStatusFlow.value = msg
+                    WatchGithubUpdater.statusFlow.value = msg
                 }
             }
         }
@@ -115,10 +113,13 @@ class MainActivity : ComponentActivity() {
         runCatching {
             Wearable.getChannelClient(this).registerChannelCallback(channelCallback)
         }
+        if (WatchGithubUpdater.statusFlow.value == "OTA Update") {
+            WatchGithubUpdater.statusFlow.value = "${WatchGithubUpdater.resolveInstalledVersion(this)} OTA"
+        }
 
         setContent {
             val workoutState by SensorWorkoutService.state.collectAsState()
-            val updateStatus by updateStatusFlow.collectAsState()
+            val updateStatus by WatchGithubUpdater.statusFlow.collectAsState()
             WatchSensorScreen(
                 state = workoutState,
                 updateStatus = updateStatus,
@@ -140,18 +141,18 @@ class MainActivity : ComponentActivity() {
     private fun triggerWatchOtaUpdate() {
         val existingBtFile = incomingWatchApkFile
         if (existingBtFile != null && existingBtFile.exists() && existingBtFile.length() > 0L) {
-            updateStatusFlow.value = WatchGithubUpdater.promptInstallWatchApk(this, existingBtFile)
+            WatchGithubUpdater.statusFlow.value = WatchGithubUpdater.promptInstallWatchApk(this, existingBtFile)
             return
         }
         lifecycleScope.launch {
             val downloaded = WatchGithubUpdater.downloadLatestWatchApkFromGithub(
                 context = this@MainActivity,
-                onStatus = { status -> updateStatusFlow.value = status }
+                onStatus = { status -> WatchGithubUpdater.statusFlow.value = status }
             )
             if (downloaded != null) {
                 incomingWatchApkFile = downloaded
                 val res = WatchGithubUpdater.promptInstallWatchApk(this@MainActivity, downloaded)
-                updateStatusFlow.value = res
+                WatchGithubUpdater.statusFlow.value = res
             }
         }
     }
