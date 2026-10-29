@@ -65,8 +65,10 @@ class SensorWorkoutService : Service(), SensorEventListener {
         const val ACTION_START = "com.fitness.zwiftbike.wear.ACTION_START"
         const val ACTION_STOP = "com.fitness.zwiftbike.wear.ACTION_STOP"
         const val ACTION_TOGGLE_MODE = "com.fitness.zwiftbike.wear.ACTION_TOGGLE_MODE"
+        const val ACTION_SET_MODE = "com.fitness.zwiftbike.wear.ACTION_SET_MODE"
         const val ACTION_TOGGLE_SIM = "com.fitness.zwiftbike.wear.ACTION_TOGGLE_SIM"
         const val ACTION_REFRESH_SENSORS = "com.fitness.zwiftbike.wear.ACTION_REFRESH_SENSORS"
+        const val EXTRA_MODE = "extra_mode"
 
         private val _state = MutableStateFlow(WatchWorkoutState())
         val state: StateFlow<WatchWorkoutState> = _state.asStateFlow()
@@ -107,11 +109,13 @@ class SensorWorkoutService : Service(), SensorEventListener {
             }
             ACTION_TOGGLE_MODE -> {
                 val nextMode = if (_state.value.mode == "ANKLE") "WRIST" else "ANKLE"
-                cadenceEstimator.reset()
-                _state.value = _state.value.copy(
-                    mode = nextMode,
-                    rpm = if (nextMode == "WRIST" && !_state.value.isSimulated) 0f else _state.value.rpm
-                )
+                applyModeChange(nextMode)
+            }
+            ACTION_SET_MODE -> {
+                val targetMode = intent.getStringExtra(EXTRA_MODE)?.uppercase() ?: "ANKLE"
+                if (targetMode == "ANKLE" || targetMode == "WRIST") {
+                    applyModeChange(targetMode)
+                }
             }
             ACTION_TOGGLE_SIM -> {
                 val nextSim = !_state.value.isSimulated
@@ -119,6 +123,23 @@ class SensorWorkoutService : Service(), SensorEventListener {
             }
         }
         return START_STICKY
+    }
+
+    private fun applyModeChange(nextMode: String) {
+        cadenceEstimator.reset()
+        _state.value = _state.value.copy(
+            mode = nextMode,
+            rpm = if (nextMode == "WRIST" && !_state.value.isSimulated) 0f else _state.value.rpm
+        )
+        // Immediately broadcast mode sync packet over Bluetooth & UDP even when workout is not active
+        serviceScope.launch {
+            telemetrySender.sendTelemetry(
+                mode = nextMode,
+                rpm = _state.value.rpm,
+                bpm = _state.value.bpm,
+                timestampMs = System.currentTimeMillis()
+            )
+        }
     }
 
     private fun startWorkout() {

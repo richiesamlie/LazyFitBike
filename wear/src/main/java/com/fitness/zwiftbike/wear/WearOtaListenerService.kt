@@ -24,13 +24,23 @@ class WearOtaListenerService : WearableListenerService() {
                     .sendMessage(event.sourceNodeId, "/velopulse/pong", ver.toByteArray(Charsets.UTF_8))
             }
             "/velopulse/control" -> {
-                val cmd = String(event.data, Charsets.UTF_8).trim().uppercase()
-                if (cmd == "TOGGLE_MODE") {
-                    val intent = Intent(this, SensorWorkoutService::class.java).apply {
-                        action = SensorWorkoutService.ACTION_TOGGLE_MODE
+                val cmd = String(event.data, Charsets.UTF_8).trim()
+                val intent = Intent(this, SensorWorkoutService::class.java).apply {
+                    when {
+                        cmd.equals("TOGGLE_MODE", ignoreCase = true) -> {
+                            action = SensorWorkoutService.ACTION_TOGGLE_MODE
+                        }
+                        cmd.startsWith("SET_MODE:", ignoreCase = true) -> {
+                            action = SensorWorkoutService.ACTION_SET_MODE
+                            putExtra(
+                                SensorWorkoutService.EXTRA_MODE,
+                                cmd.substringAfter(":").trim().uppercase()
+                            )
+                        }
+                        else -> return
                     }
-                    runCatching { startService(intent) }
                 }
+                runCatching { startService(intent) }
             }
         }
     }

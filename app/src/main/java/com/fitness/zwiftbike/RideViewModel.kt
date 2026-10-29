@@ -4,12 +4,15 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.android.gms.wearable.Wearable
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.util.Collections
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -63,7 +66,7 @@ data class RideUiState(
     val isMapModalOpen: Boolean = false,
     val isStravaModalOpen: Boolean = false,
     val isUpdateModalOpen: Boolean = false,
-    val installedVersionName: String = "v1.3.4",
+    val installedVersionName: String = "v1.3.5",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
@@ -108,9 +111,6 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile
     private var watchBpm: Int = 0
 
-    @Volatile
-    private var manualSensorModeOverride: Boolean = false
-
     private var elapsedAccumulatorSec: Float = 0f
 
     private val bots = listOf(
@@ -129,7 +129,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         if (current.connectionState != ConnectionState.DEMO_MODE) {
             _uiState.value = current.copy(
                 connectionState = ConnectionState.LIVE_WATCH,
-                sensorMode = if (manualSensorModeOverride) current.sensorMode else packet.mode
+                sensorMode = packet.mode
             )
         }
     }
@@ -137,9 +137,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     private fun resolveInstalledVersion(app: Application): String {
         return runCatching {
             val info = app.packageManager.getPackageInfo(app.packageName, 0)
-            val vName = info.versionName ?: "1.3.4"
+            val vName = info.versionName ?: "1.3.5"
             if (vName.startsWith("v")) vName else "v$vName"
-        }.getOrDefault("v1.3.4")
+        }.getOrDefault("v1.3.5")
     }
 
     init {
@@ -611,9 +611,19 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleSensorMode() {
-        manualSensorModeOverride = true
         val next = if (_uiState.value.sensorMode == "ANKLE") "WRIST" else "ANKLE"
         _uiState.value = _uiState.value.copy(sensorMode = next)
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val nodeClient = Wearable.getNodeClient(getApplication<Application>())
+                val messageClient = Wearable.getMessageClient(getApplication<Application>())
+                val nodes = nodeClient.connectedNodes.await()
+                val payload = "SET_MODE:$next".toByteArray(Charsets.UTF_8)
+                for (node in nodes) {
+                    messageClient.sendMessage(node.id, "/velopulse/control", payload).await()
+                }
+            }
+        }
     }
 
     fun changeGear(delta: Int) {
