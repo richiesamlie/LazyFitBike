@@ -16,6 +16,12 @@ Zwift-style 3D indoor cycling application for Android Phone (`:app`) and Samsung
     - 4 preset real-world routes (*Alpe d'Huez*, *Central Park*, *Marina Bay*, *Kintamani Bali*).
     - Interactive OpenStreetMap view with 2-tap OSRM online road routing anywhere in the world.
     - `.GPX` route file import.
+  - **Structured Workout & Interval Training Engine**:
+    - Built-in library of 5 curated workouts (*FTP Ramp Test*, *Sweet Spot 2x20*, *30/30 VO2 Max Attacks*, *Threshold Over-Unders*, and *Active Recovery Spin*) plus native `.ZWO` (Zwift Workout XML) file import.
+    - Curved Holographic 3D Visor interval timeline ribbon with real-time countdown timer, dynamic power target reticle bracket, live pacing cues, and step compliance stars.
+    - Full Coggan cycling metrics (Normalized Power, Intensity Factor, Training Stress Score).
+    - Bi-directional Galaxy Watch 4 interval synchronization with 3-second haptic transition pulse and low-latency audio countdown beeps.
+    - Automated Ramp Test exhaustion detection with 1-tap FTP recalculation and profile/watch sync.
   - **Strava Co-op (`StravaSyncManager`)**:
     - Records 1 Hz GPS trackpoints (`lat`, `lon`, `ele`, `time`) with Garmin `TrackPointExtension v1` (`<power>`, `<gpxtpx:hr>`, `<gpxtpx:cad>`).
     - 1-Tap `.GPX` export and Android Share Sheet integration plus direct Strava v3 API upload (`POST /api/v3/uploads`).

@@ -46,6 +46,16 @@ class WearOtaListenerService : WearableListenerService() {
                                 cmd.substringAfter(":").trim().toIntOrNull() ?: 190
                             )
                         }
+                        cmd.startsWith("WORKOUT_STEP:", ignoreCase = true) -> {
+                            action = SensorWorkoutService.ACTION_SET_WORKOUT_STEP
+                            putExtra(
+                                SensorWorkoutService.EXTRA_WORKOUT_PAYLOAD,
+                                cmd.substringAfter(":")
+                            )
+                        }
+                        cmd.equals("END_WORKOUT", ignoreCase = true) -> {
+                            action = SensorWorkoutService.ACTION_CLEAR_WORKOUT
+                        }
                         else -> return
                     }
                 }

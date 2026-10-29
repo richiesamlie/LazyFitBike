@@ -48,6 +48,7 @@ import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.Wearable
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
@@ -249,37 +250,69 @@ fun WatchSensorScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. Top Safe Arc: Link Status + Mode Badge (tappable for SIM)
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(SurfaceZinc)
-                    .border(1.dp, BorderZinc, RoundedCornerShape(50))
-                    .clickable { onToggleSim() }
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
+            // 1. Top Safe Arc: Workout Target Pill OR Standard Link Status + Mode Badge
+            if (state.isWorkoutActive && state.targetWatts > 0) {
+                val zColor = watchZoneColor(state.workoutZone)
+                val remM = state.stepRemainingSec / 60
+                val remS = state.stepRemainingSec % 60
+                val remTime = String.format(Locale.US, "%02d:%02d", remM, remS)
+                val isUrgent = state.stepRemainingSec <= 3
+
+                Row(
                     modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (state.isActive && state.connectedNodes > 0) SignalEmerald
-                            else if (state.isActive) SignalAmber
-                            else TextMutedZinc
-                        )
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                val modeText = buildString {
-                    append(if (state.mode == "ANKLE") "ANKLE" else "WRIST")
-                    if (state.isSimulated) append(" (SIM)")
+                        .clip(RoundedCornerShape(50))
+                        .background(if (isUrgent) Color(0xFF4C0519) else SurfaceZinc)
+                        .border(1.dp, if (isUrgent) SignalRose else zColor, RoundedCornerShape(50))
+                        .padding(horizontal = 10.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "TARGET ${state.targetWatts}W",
+                        color = if (isUrgent) SignalRose else zColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        style = TabularStyle
+                    )
+                    Text(
+                        text = " • $remTime",
+                        color = TextWhite,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        style = TabularStyle
+                    )
                 }
-                Text(
-                    text = modeText,
-                    color = AccentOrange,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
+            } else {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(SurfaceZinc)
+                        .border(1.dp, BorderZinc, RoundedCornerShape(50))
+                        .clickable { onToggleSim() }
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (state.isActive && state.connectedNodes > 0) SignalEmerald
+                                else if (state.isActive) SignalAmber
+                                else TextMutedZinc
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    val modeText = buildString {
+                        append(if (state.mode == "ANKLE") "ANKLE" else "WRIST")
+                        if (state.isSimulated) append(" (SIM)")
+                    }
+                    Text(
+                        text = modeText,
+                        color = AccentOrange,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             // 2. Center Focal Point: 44sp Tabular Metric + Secondary Pill + OTA Update Pill
@@ -330,6 +363,16 @@ fun WatchSensorScreen(
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
                 )
+
+                if (state.isWorkoutActive && state.targetRpm > 0) {
+                    Text(
+                        text = "TARGET: ${state.targetRpm} RPM",
+                        color = AccentOrange,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        style = TabularStyle
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(4.dp))
 

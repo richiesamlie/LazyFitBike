@@ -113,6 +113,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            val zwoLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.GetContent()
+            ) { uri ->
+                if (uri != null) {
+                    runCatching {
+                        val xml = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        if (!xml.isNullOrBlank()) {
+                            rideViewModel.loadZwoFromXml(xml)
+                        }
+                    }
+                }
+            }
+
+            val workoutSummary by rideViewModel.workoutSummary.collectAsState()
+
             LazyFitBikeCockpitScreen(
                 state = state,
                 onToggleSensorMode = rideViewModel::toggleSensorMode,
@@ -133,7 +148,18 @@ class MainActivity : ComponentActivity() {
                 onRelayWatchUpdate = { rideViewModel.downloadAndRelayWatchUpdate(context) },
                 onShareWatchApk = { rideViewModel.shareWatchUpdateApk(context) },
                 onExportStravaGpx = { rideViewModel.exportAndShareStravaGpx(context) },
-                onUploadDirectToStrava = rideViewModel::uploadDirectToStrava
+                onUploadDirectToStrava = rideViewModel::uploadDirectToStrava,
+                onSetWorkoutModalOpen = rideViewModel::setWorkoutModalOpen,
+                onSetWorkoutSummaryModalOpen = rideViewModel::setWorkoutSummaryModalOpen,
+                onStartWorkout = rideViewModel::startWorkout,
+                onPauseWorkout = rideViewModel::pauseWorkout,
+                onResumeWorkout = rideViewModel::resumeWorkout,
+                onSkipWorkoutStep = rideViewModel::skipWorkoutStep,
+                onAdjustWorkoutIntensity = rideViewModel::adjustWorkoutIntensity,
+                onStopWorkout = rideViewModel::stopWorkout,
+                onOpenZwoPicker = { zwoLauncher.launch("*/*") },
+                onApplyNewFtp = rideViewModel::applyNewFtpAndSync,
+                workoutSummary = workoutSummary
             )
         }
     }
@@ -273,6 +299,28 @@ private fun pushRideStateToWebView(view: WebView?, state: RideUiState) {
         state.activeRouteName.replace("'", "\\'")
     )
     view?.evaluateJavascript(jsCall, null)
+
+    val escapedWorkoutName = state.workoutName.replace("'", "\\'")
+    val escapedStepName = state.workoutStepName.replace("'", "\\'")
+    val escapedPrompt = state.workoutPacingPrompt.replace("'", "\\'")
+    val workoutJs = String.format(
+        Locale.US,
+        "if(window.updateWorkoutHud){window.updateWorkoutHud(%b,'%s',%d,%d,%d,%d,%d,'%s',%.1f,%d,'%s',%d,%b);}",
+        state.isWorkoutActive,
+        escapedWorkoutName,
+        state.workoutTargetWatts,
+        state.workoutTargetRpm,
+        state.workoutStepRemainingSec,
+        state.workoutStepIndex,
+        state.workoutTotalSteps,
+        escapedStepName,
+        state.workoutCompliancePercent,
+        state.workoutEarnedStars,
+        escapedPrompt,
+        state.workoutIntensityBiasPercent,
+        state.isWorkoutPaused
+    )
+    view?.evaluateJavascript(workoutJs, null)
 }
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -297,7 +345,18 @@ fun LazyFitBikeCockpitScreen(
     onRelayWatchUpdate: () -> Unit,
     onShareWatchApk: () -> Unit,
     onExportStravaGpx: () -> Unit,
-    onUploadDirectToStrava: (String) -> Unit
+    onUploadDirectToStrava: (String) -> Unit,
+    onSetWorkoutModalOpen: (Boolean) -> Unit,
+    onSetWorkoutSummaryModalOpen: (Boolean) -> Unit,
+    onStartWorkout: (Workout) -> Unit,
+    onPauseWorkout: () -> Unit,
+    onResumeWorkout: () -> Unit,
+    onSkipWorkoutStep: () -> Unit,
+    onAdjustWorkoutIntensity: (Int) -> Unit,
+    onStopWorkout: () -> Unit,
+    onOpenZwoPicker: () -> Unit,
+    onApplyNewFtp: (Int) -> Unit,
+    workoutSummary: WorkoutSummary?
 ) {
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var stravaAccessToken by remember { mutableStateOf("") }
@@ -324,7 +383,20 @@ fun LazyFitBikeCockpitScreen(
         state.powerZone,
         state.hrZone,
         state.elapsedSeconds,
-        state.activeRouteName
+        state.activeRouteName,
+        state.isWorkoutActive,
+        state.workoutName,
+        state.workoutTargetWatts,
+        state.workoutTargetRpm,
+        state.workoutStepRemainingSec,
+        state.workoutStepIndex,
+        state.workoutTotalSteps,
+        state.workoutStepName,
+        state.workoutCompliancePercent,
+        state.workoutEarnedStars,
+        state.workoutPacingPrompt,
+        state.workoutIntensityBiasPercent,
+        state.isWorkoutPaused
     ) {
         pushRideStateToWebView(webViewRef, state)
     }
@@ -1208,6 +1280,436 @@ fun LazyFitBikeCockpitScreen(
                 }
             }
 
+            // STRUCTURED WORKOUT PICKER MODAL
+            if (state.isWorkoutModalOpen) {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    HudPod(
+                        modifier = Modifier
+                            .fillMaxWidth(0.94f)
+                            .fillMaxHeight(0.85f),
+                        borderColor = AccentOrange
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "STRUCTURED WORKOUT LIBRARY",
+                                    color = AccentOrange,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = onOpenZwoPicker,
+                                        modifier = Modifier.heightIn(min = 36.dp),
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF1E3A8A),
+                                            contentColor = Color(0xFF93C5FD)
+                                        )
+                                    ) {
+                                        Text("Import .ZWO", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Button(
+                                        onClick = { onSetWorkoutModalOpen(false) },
+                                        modifier = Modifier.heightIn(min = 36.dp),
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = BgControlDark,
+                                            contentColor = TextPrimaryWhite
+                                        )
+                                    ) {
+                                        Text("Close", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+
+                            Text(
+                                text = "Select a precision training session scaled to your current FTP (${state.ftpWatts} W):",
+                                color = TextMutedZinc,
+                                fontSize = 11.sp
+                            )
+
+                            for (w in WorkoutEngine.presetWorkouts) {
+                                val mins = w.totalDurationSeconds / 60
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(BgControlDark)
+                                        .border(1.dp, BorderZinc, RoundedCornerShape(8.dp))
+                                        .padding(10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = w.name,
+                                                color = TextPrimaryWhite,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(
+                                                        when (w.category) {
+                                                            WorkoutType.RAMP_TEST -> Color(0xFF7C3AED)
+                                                            WorkoutType.VO2_MAX -> SignalRose
+                                                            WorkoutType.SWEET_SPOT -> AccentOrange
+                                                            WorkoutType.THRESHOLD -> SignalAmber
+                                                            else -> SignalEmerald
+                                                        }
+                                                    )
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = w.category.name,
+                                                    color = Color.White,
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Black
+                                                )
+                                            }
+                                            Text(
+                                                text = "$mins mins • ${w.steps.size} steps",
+                                                color = TextMutedZinc,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                        Text(
+                                            text = w.description,
+                                            color = TextMutedZinc,
+                                            fontSize = 11.sp,
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        )
+                                    }
+
+                                    Button(
+                                        onClick = { onStartWorkout(w) },
+                                        modifier = Modifier
+                                            .heightIn(min = 40.dp)
+                                            .padding(start = 10.dp),
+                                        shape = RoundedCornerShape(6.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = AccentOrange,
+                                            contentColor = Color.White
+                                        )
+                                    ) {
+                                        Text("Start", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // POST-WORKOUT SUMMARY ANALYTICS MODAL
+            if (state.isWorkoutSummaryModalOpen && workoutSummary != null) {
+                val sum = workoutSummary
+                val sumMins = sum.totalTimeSeconds / 60
+                val sumSecs = sum.totalTimeSeconds % 60
+                val durationStr = String.format(Locale.US, "%02d:%02d", sumMins, sumSecs)
+
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    HudPod(
+                        modifier = Modifier
+                            .fillMaxWidth(0.94f)
+                            .fillMaxHeight(0.88f)
+                            .verticalScroll(rememberScrollState()),
+                        borderColor = SignalEmerald
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "WORKOUT COMPLETE: ${sum.workoutName.uppercase()}",
+                                    color = SignalEmerald,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Button(
+                                    onClick = { onSetWorkoutSummaryModalOpen(false) },
+                                    modifier = Modifier.heightIn(min = 36.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = BgControlDark,
+                                        contentColor = TextPrimaryWhite
+                                    )
+                                ) {
+                                    Text("Close", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            // New FTP Detected Card (from Ramp Test)
+                            if (sum.detectedFtpWatts != null) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF2E1065))
+                                        .border(1.dp, Color(0xFFA78BFA), RoundedCornerShape(8.dp))
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "🏆 NEW ESTIMATED FTP: ${sum.detectedFtpWatts} W",
+                                            color = Color(0xFFDDD6FE),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                        Text(
+                                            text = "Previous FTP: ${sum.previousFtpWatts} W (${if (sum.detectedFtpWatts >= sum.previousFtpWatts) "+" else ""}${sum.detectedFtpWatts - sum.previousFtpWatts} W)",
+                                            color = Color(0xFFA78BFA),
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    Button(
+                                        onClick = { onApplyNewFtp(sum.detectedFtpWatts) },
+                                        shape = RoundedCornerShape(6.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF7C3AED),
+                                            contentColor = Color.White
+                                        )
+                                    ) {
+                                        Text("Apply & Sync", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                    }
+                                }
+                            }
+
+                            // Coggan Metrics Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(BgControlDark)
+                                        .padding(10.dp)
+                                ) {
+                                    MetricColumn(label = "TSS (STRESS)", value = "${sum.tss}", unit = "PTS")
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(BgControlDark)
+                                        .padding(10.dp)
+                                ) {
+                                    MetricColumn(label = "NORM POWER", value = "${sum.normalizedPowerWatts}", unit = "W")
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(BgControlDark)
+                                        .padding(10.dp)
+                                ) {
+                                    MetricColumn(
+                                        label = "INTENSITY",
+                                        value = String.format(Locale.US, "%.2f", sum.intensityFactor),
+                                        unit = "IF"
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(BgControlDark)
+                                        .padding(10.dp)
+                                ) {
+                                    MetricColumn(
+                                        label = "COMPLIANCE",
+                                        value = "${sum.overallCompliancePercent.toInt()}%",
+                                        unit = "★ ${sum.totalStarsEarned}/${sum.maxStarsPossible}"
+                                    )
+                                }
+                            }
+
+                            // Secondary Metrics
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(BgControlDark)
+                                        .padding(10.dp)
+                                ) {
+                                    MetricColumn(label = "DURATION", value = durationStr, unit = "TIME")
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(BgControlDark)
+                                        .padding(10.dp)
+                                ) {
+                                    MetricColumn(label = "AVG POWER", value = "${sum.avgWatts}", unit = "W")
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(BgControlDark)
+                                        .padding(10.dp)
+                                ) {
+                                    MetricColumn(label = "MAX POWER", value = "${sum.maxWatts}", unit = "W")
+                                }
+                            }
+
+                            // 1-Tap Strava Share
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = onExportStravaGpx,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 44.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AccentOrange,
+                                        contentColor = Color.White
+                                    )
+                                ) {
+                                    Text("Share Workout GPX to Strava", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // IN-RIDE WORKOUT QUICK CONTROLS BAR (Active during workout)
+            if (state.isWorkoutActive) {
+                HudPod(
+                    modifier = Modifier.fillMaxWidth(),
+                    borderColor = AccentOrange
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    if (state.isWorkoutPaused) onResumeWorkout() else onPauseWorkout()
+                                },
+                                modifier = Modifier.heightIn(min = 44.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (state.isWorkoutPaused) SignalEmerald else BgControlDark,
+                                    contentColor = TextPrimaryWhite
+                                )
+                            ) {
+                                Text(
+                                    text = if (state.isWorkoutPaused) "▶ Resume" else "⏸ Pause",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Button(
+                                onClick = onSkipWorkoutStep,
+                                modifier = Modifier.heightIn(min = 44.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = TextPrimaryWhite
+                                )
+                            ) {
+                                Text("⏭ Skip Step", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text("Bias:", color = TextMutedZinc, fontSize = 11.sp)
+                            Button(
+                                onClick = { onAdjustWorkoutIntensity(-5) },
+                                modifier = Modifier.heightIn(min = 36.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = TextPrimaryWhite
+                                ),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("-5%", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Text(
+                                text = (if (state.workoutIntensityBiasPercent > 0) "+" else "") + "${state.workoutIntensityBiasPercent}%",
+                                color = if (state.workoutIntensityBiasPercent != 0) AccentOrange else TextPrimaryWhite,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 12.sp,
+                                style = TabularStyle
+                            )
+                            Button(
+                                onClick = { onAdjustWorkoutIntensity(5) },
+                                modifier = Modifier.heightIn(min = 36.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = TextPrimaryWhite
+                                ),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("+5%", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Button(
+                            onClick = onStopWorkout,
+                            modifier = Modifier.heightIn(min = 44.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF7F1D1D),
+                                contentColor = Color(0xFFFCA5A5)
+                            )
+                        ) {
+                            Text("⏹ End", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
             // BOTTOM PERIMETER ROW
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1311,6 +1813,22 @@ fun LazyFitBikeCockpitScreen(
                         ) {
                             Text(
                                 text = "Update",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Button(
+                            onClick = { onSetWorkoutModalOpen(!state.isWorkoutModalOpen) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (state.isWorkoutModalOpen || state.isWorkoutActive) AccentOrange else BgControlDark,
+                                contentColor = TextPrimaryWhite
+                            )
+                        ) {
+                            Text(
+                                text = if (state.isWorkoutActive) "Workout (Active)" else "Workout",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )

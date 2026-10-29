@@ -108,7 +108,21 @@
       hrZone: 1,
       elapsedSeconds: 0,
       activeRouteName: "Alpe d'Huez Climb",
-      wheelRotationRad: 0
+      wheelRotationRad: 0,
+      // Structured Workout State
+      isWorkoutActive: false,
+      workoutName: '',
+      workoutTargetWatts: 0,
+      workoutTargetRpm: 0,
+      workoutStepRemainingSec: 0,
+      workoutStepIndex: 0,
+      workoutTotalSteps: 0,
+      workoutStepName: '',
+      workoutCompliancePercent: 100,
+      workoutEarnedStars: 0,
+      workoutPacingPrompt: '',
+      workoutIntensityBiasPercent: 0,
+      isWorkoutPaused: false
     };
 
     let routeWaypoints = [
@@ -182,6 +196,25 @@
         fullMapContainer.style.display = shouldShowMap ? 'block' : 'none';
         resize();
       }
+    };
+
+    window.updateWorkoutHud = function(
+      active, name, targetWatts, targetRpm, remainingSec, stepIdx, totalSteps,
+      stepName, compliancePct, earnedStars, prompt, biasPct, paused
+    ) {
+      state.isWorkoutActive = Boolean(active);
+      state.workoutName = name ? String(name) : '';
+      state.workoutTargetWatts = Math.max(0, Math.round(Number(targetWatts) || 0));
+      state.workoutTargetRpm = Math.max(0, Math.round(Number(targetRpm) || 0));
+      state.workoutStepRemainingSec = Math.max(0, Math.round(Number(remainingSec) || 0));
+      state.workoutStepIndex = Math.max(0, Math.round(Number(stepIdx) || 0));
+      state.workoutTotalSteps = Math.max(0, Math.round(Number(totalSteps) || 0));
+      state.workoutStepName = stepName ? String(stepName) : '';
+      state.workoutCompliancePercent = Math.min(100, Math.max(0, Number(compliancePct) || 100));
+      state.workoutEarnedStars = Math.max(0, Math.round(Number(earnedStars) || 0));
+      state.workoutPacingPrompt = prompt ? String(prompt) : '';
+      state.workoutIntensityBiasPercent = Math.round(Number(biasPct) || 0);
+      state.isWorkoutPaused = Boolean(paused);
     };
 
     // OpenStreetMap 2D Map support (Modal & MAP mode)
@@ -914,6 +947,21 @@
       hudCtx.stroke();
       hudCtx.restore();
 
+      // Target Power needle bracket (if workout active)
+      if (state.isWorkoutActive && state.workoutTargetWatts > 0) {
+        const targetFrac = Math.min(1.0, Math.max(0.0, state.workoutTargetWatts / maxDisplayWatts));
+        const targetAng = Math.PI * 0.8 + (Math.PI * 1.4) * targetFrac;
+        hudCtx.save();
+        hudCtx.beginPath();
+        hudCtx.arc(cx, cy, arcRadius, targetAng - 0.04, targetAng + 0.04, false);
+        hudCtx.lineWidth = 22;
+        hudCtx.strokeStyle = '#FFFFFF';
+        hudCtx.shadowColor = '#38BDF8';
+        hudCtx.shadowBlur = 14;
+        hudCtx.stroke();
+        hudCtx.restore();
+      }
+
       // Inner Tick marks & Horizon crosshairs
       hudCtx.save();
       hudCtx.strokeStyle = 'rgba(244, 244, 245, 0.35)';
@@ -927,6 +975,23 @@
 
       // Center Big Readouts: Watts & Zone Pill
       hudCtx.textAlign = 'center';
+
+      // Pacing Prompt Pill (if workout active)
+      if (state.isWorkoutActive && state.workoutTargetWatts > 0) {
+        hudCtx.save();
+        const promptBg = state.workoutPacingPrompt.indexOf('ON TARGET') !== -1 ? 'rgba(52, 211, 153, 0.25)' : 'rgba(249, 115, 22, 0.25)';
+        const promptBorder = state.workoutPacingPrompt.indexOf('ON TARGET') !== -1 ? '#34D399' : '#F97316';
+        hudCtx.fillStyle = promptBg;
+        hudCtx.fillRect(cx - 170, cy - 100, 340, 28);
+        hudCtx.strokeStyle = promptBorder;
+        hudCtx.lineWidth = 1.5;
+        hudCtx.strokeRect(cx - 170, cy - 100, 340, 28);
+        hudCtx.fillStyle = '#FFFFFF';
+        hudCtx.font = 'bold 13px sans-serif';
+        hudCtx.fillText('TARGET ' + state.workoutTargetWatts + 'W (' + state.workoutTargetRpm + ' RPM)  •  ' + state.workoutPacingPrompt, cx, cy - 81);
+        hudCtx.restore();
+      }
+
       hudCtx.fillStyle = pColor;
       hudCtx.font = '900 68px sans-serif';
       hudCtx.shadowColor = pColor;
@@ -1117,23 +1182,79 @@
       hudCtx.font = '900 32px sans-serif';
       hudCtx.fillText(timeStr, rightX + 24, rightY + 415);
 
-      // 5. TOP HEADER ROUTE BADGE
-      hudCtx.textAlign = 'center';
-      hudCtx.fillStyle = 'rgba(9, 9, 11, 0.75)';
-      hudCtx.fillRect(cx - 210, 48, 420, 36);
-      hudCtx.strokeStyle = 'rgba(39, 39, 42, 0.9)';
-      hudCtx.lineWidth = 1.5;
-      hudCtx.strokeRect(cx - 210, 48, 420, 36);
+      // 5. TOP HEADER: ROUTE BADGE OR STRUCTURED WORKOUT RIBBON
+      if (state.isWorkoutActive) {
+        hudCtx.save();
+        const ribbonW = 680;
+        const ribbonH = 70;
+        const rx = cx - ribbonW / 2;
+        const ry = 40;
 
-      // Live GPS Dot
-      hudCtx.fillStyle = '#34D399';
-      hudCtx.beginPath();
-      hudCtx.arc(cx - 186, 66, 5, 0, Math.PI * 2);
-      hudCtx.fill();
+        // Base frame
+        hudCtx.fillStyle = 'rgba(9, 9, 11, 0.88)';
+        hudCtx.fillRect(rx, ry, ribbonW, ribbonH);
+        const isPulse = state.workoutStepRemainingSec <= 3 && Math.sin(now * 0.015) > 0;
+        hudCtx.strokeStyle = isPulse ? '#F43F5E' : pColor;
+        hudCtx.lineWidth = isPulse ? 2.5 : 1.5;
+        hudCtx.strokeRect(rx, ry, ribbonW, ribbonH);
 
-      hudCtx.fillStyle = '#F4F4F5';
-      hudCtx.font = 'bold 14px sans-serif';
-      hudCtx.fillText(state.activeRouteName.toUpperCase(), cx + 10, 72);
+        // Top accent strip in target zone color
+        hudCtx.fillStyle = pColor;
+        hudCtx.fillRect(rx, ry, ribbonW, 4);
+
+        // Left Section: Step info
+        hudCtx.textAlign = 'left';
+        hudCtx.fillStyle = '#A1A1AA';
+        hudCtx.font = 'bold 11px sans-serif';
+        hudCtx.fillText(
+          'STEP ' + (state.workoutStepIndex + 1) + ' OF ' + state.workoutTotalSteps + (state.workoutIntensityBiasPercent !== 0 ? ' (' + (state.workoutIntensityBiasPercent > 0 ? '+' : '') + state.workoutIntensityBiasPercent + '%)' : ''),
+          rx + 18,
+          ry + 24
+        );
+        hudCtx.fillStyle = '#FFFFFF';
+        hudCtx.font = '900 16px sans-serif';
+        hudCtx.fillText(state.workoutStepName.toUpperCase(), rx + 18, ry + 46);
+
+        // Center Section: Big Countdown Timer
+        hudCtx.textAlign = 'center';
+        const remMins = Math.floor(state.workoutStepRemainingSec / 60);
+        const remSecs = state.workoutStepRemainingSec % 60;
+        const remStr = String(remMins).padStart(2, '0') + ':' + String(remSecs).padStart(2, '0');
+        hudCtx.fillStyle = isPulse ? '#F43F5E' : '#FFFFFF';
+        hudCtx.font = '900 32px sans-serif';
+        hudCtx.fillText(remStr, cx, ry + 44);
+        hudCtx.fillStyle = '#A1A1AA';
+        hudCtx.font = 'bold 10px sans-serif';
+        hudCtx.fillText(state.isWorkoutPaused ? 'PAUSED' : 'REMAINING', cx, ry + 60);
+
+        // Right Section: Earned Stars & Compliance
+        hudCtx.textAlign = 'right';
+        hudCtx.fillStyle = '#FBBF24';
+        hudCtx.font = 'bold 16px sans-serif';
+        hudCtx.fillText('★ ' + state.workoutEarnedStars, rx + ribbonW - 18, ry + 26);
+        hudCtx.fillStyle = '#34D399';
+        hudCtx.font = '900 15px sans-serif';
+        hudCtx.fillText(state.workoutCompliancePercent.toFixed(0) + '% COMPL', rx + ribbonW - 18, ry + 48);
+
+        hudCtx.restore();
+      } else {
+        hudCtx.textAlign = 'center';
+        hudCtx.fillStyle = 'rgba(9, 9, 11, 0.75)';
+        hudCtx.fillRect(cx - 210, 48, 420, 36);
+        hudCtx.strokeStyle = 'rgba(39, 39, 42, 0.9)';
+        hudCtx.lineWidth = 1.5;
+        hudCtx.strokeRect(cx - 210, 48, 420, 36);
+
+        // Live GPS Dot
+        hudCtx.fillStyle = '#34D399';
+        hudCtx.beginPath();
+        hudCtx.arc(cx - 186, 66, 5, 0, Math.PI * 2);
+        hudCtx.fill();
+
+        hudCtx.fillStyle = '#F4F4F5';
+        hudCtx.font = 'bold 14px sans-serif';
+        hudCtx.fillText(state.activeRouteName.toUpperCase(), cx + 10, 72);
+      }
 
       hudCtx.restore();
 

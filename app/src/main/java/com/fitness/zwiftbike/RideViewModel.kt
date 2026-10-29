@@ -67,6 +67,21 @@ data class RideUiState(
     val isStravaModalOpen: Boolean = false,
     val isUpdateModalOpen: Boolean = false,
     val isProfileModalOpen: Boolean = false,
+    val isWorkoutModalOpen: Boolean = false,
+    val isWorkoutSummaryModalOpen: Boolean = false,
+    val isWorkoutActive: Boolean = false,
+    val workoutName: String = "",
+    val workoutTargetWatts: Int = 0,
+    val workoutTargetRpm: Int = 0,
+    val workoutStepRemainingSec: Int = 0,
+    val workoutStepIndex: Int = 0,
+    val workoutTotalSteps: Int = 0,
+    val workoutStepName: String = "",
+    val workoutCompliancePercent: Float = 100f,
+    val workoutEarnedStars: Int = 0,
+    val workoutPacingPrompt: String = "",
+    val workoutIntensityBiasPercent: Int = 0,
+    val isWorkoutPaused: Boolean = false,
     val riderWeightKg: Float = 70f,
     val bikeWeightKg: Float = 9f,
     val ftpWatts: Int = 220,
@@ -75,7 +90,7 @@ data class RideUiState(
     val riderAge: Int = 30,
     val powerZone: Int = 1,
     val hrZone: Int = 1,
-    val installedVersionName: String = "v1.3.7",
+    val installedVersionName: String = "v1.3.8",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
@@ -89,6 +104,17 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
 
     private val physics = CyclingPhysics()
     private var activeRoute: GpsRoute = GpsRouteEngine.presetRoutes.first()
+
+    private val tonePlayer = WorkoutTonePlayer()
+    private val _workoutProgress = MutableStateFlow<WorkoutProgress?>(null)
+    val workoutProgress: StateFlow<WorkoutProgress?> = _workoutProgress.asStateFlow()
+
+    private val _workoutSummary = MutableStateFlow<WorkoutSummary?>(null)
+    val workoutSummary: StateFlow<WorkoutSummary?> = _workoutSummary.asStateFlow()
+
+    private val workoutWattsHistory = Collections.synchronizedList(ArrayList<Int>())
+    private val currentStepWattsSamples = Collections.synchronizedList(ArrayList<Int>())
+    private var rampFailureSecondsCount = 0
 
     private val recordedPoints = Collections.synchronizedList(ArrayList<RecordedTrackPoint>())
     private var lastRecordedElapsedSec: Int = -1
@@ -288,6 +314,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                         wattsSum += wInt
                         bpmSum += inputBpm
                         rpmSum += rInt
+
+                        tickWorkoutSecond(wInt, rInt, inputBpm)
                     }
                 }
 
@@ -306,6 +334,21 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                 val wRounded = stepResult.watts.roundToInt()
                 val pZone = CyclingPhysics.computePowerZone(wRounded, physics.ftpWatts)
                 val hZone = CyclingPhysics.computeHrZone(inputBpm, physics.maxHr)
+
+                val wp = _workoutProgress.value
+                val isWorkoutActive = wp != null && !wp.isCompleted
+                val wTargetWatts = wp?.targetWatts ?: 0
+                val wTargetRpm = wp?.targetCadenceRpm ?: 0
+                val wRemaining = wp?.stepRemainingSeconds ?: 0
+                val wStepIdx = wp?.currentStepIndex ?: 0
+                val wTotalSteps = wp?.workout?.steps?.size ?: 0
+                val wStepName = wp?.currentStep?.name ?: ""
+                val wComp = wp?.currentStepCompliancePercent ?: 100f
+                val wStars = wp?.earnedStars ?: 0
+                val wPrompt = wp?.pacingPrompt ?: ""
+                val wBias = wp?.intensityBiasPercent ?: 0
+                val wPaused = wp?.isPaused ?: false
+                val wName = wp?.workout?.name ?: ""
 
                 _uiState.value = current.copy(
                     connectionState = nextConnState,
@@ -331,7 +374,20 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                     recordedTrackPointsCount = count,
                     avgWatts = avgW,
                     avgBpm = avgB,
-                    avgRpm = avgR
+                    avgRpm = avgR,
+                    isWorkoutActive = isWorkoutActive,
+                    workoutName = wName,
+                    workoutTargetWatts = wTargetWatts,
+                    workoutTargetRpm = wTargetRpm,
+                    workoutStepRemainingSec = wRemaining,
+                    workoutStepIndex = wStepIdx,
+                    workoutTotalSteps = wTotalSteps,
+                    workoutStepName = wStepName,
+                    workoutCompliancePercent = wComp,
+                    workoutEarnedStars = wStars,
+                    workoutPacingPrompt = wPrompt,
+                    workoutIntensityBiasPercent = wBias,
+                    isWorkoutPaused = wPaused
                 )
 
                 delay(50L)
@@ -408,7 +464,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             isMapModalOpen = open,
             isStravaModalOpen = false,
             isUpdateModalOpen = false,
-            isProfileModalOpen = false
+            isProfileModalOpen = false,
+            isWorkoutModalOpen = false,
+            isWorkoutSummaryModalOpen = false
         )
     }
 
@@ -417,7 +475,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             isStravaModalOpen = open,
             isMapModalOpen = false,
             isUpdateModalOpen = false,
-            isProfileModalOpen = false
+            isProfileModalOpen = false,
+            isWorkoutModalOpen = false,
+            isWorkoutSummaryModalOpen = false
         )
     }
 
@@ -426,7 +486,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             isUpdateModalOpen = open,
             isMapModalOpen = false,
             isStravaModalOpen = false,
-            isProfileModalOpen = false
+            isProfileModalOpen = false,
+            isWorkoutModalOpen = false,
+            isWorkoutSummaryModalOpen = false
         )
         if (open && _uiState.value.latestReleaseTag == "Unchecked") {
             checkGithubUpdates()
@@ -438,7 +500,31 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             isProfileModalOpen = open,
             isMapModalOpen = false,
             isStravaModalOpen = false,
-            isUpdateModalOpen = false
+            isUpdateModalOpen = false,
+            isWorkoutModalOpen = false,
+            isWorkoutSummaryModalOpen = false
+        )
+    }
+
+    fun setWorkoutModalOpen(open: Boolean) {
+        _uiState.value = _uiState.value.copy(
+            isWorkoutModalOpen = open,
+            isMapModalOpen = false,
+            isStravaModalOpen = false,
+            isUpdateModalOpen = false,
+            isProfileModalOpen = false,
+            isWorkoutSummaryModalOpen = false
+        )
+    }
+
+    fun setWorkoutSummaryModalOpen(open: Boolean) {
+        _uiState.value = _uiState.value.copy(
+            isWorkoutSummaryModalOpen = open,
+            isWorkoutModalOpen = false,
+            isMapModalOpen = false,
+            isStravaModalOpen = false,
+            isUpdateModalOpen = false,
+            isProfileModalOpen = false
         )
     }
 
@@ -673,10 +759,13 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
 
     fun exportAndShareStravaGpx(context: Context) {
         val snapshot = ensureNonEmptyTrackPoints()
+        val effectiveTitle = _workoutSummary.value?.workoutName?.let { "$it - ${activeRoute.name}" }
+            ?: _workoutProgress.value?.workout?.name?.let { "$it - ${activeRoute.name}" }
+            ?: activeRoute.name
         runCatching {
             val file = StravaSyncManager.exportAndShareGpx(
                 context = context,
-                routeName = activeRoute.name,
+                routeName = effectiveTitle,
                 trackPoints = snapshot
             )
             _uiState.value = _uiState.value.copy(
@@ -691,13 +780,16 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
 
     fun uploadDirectToStrava(accessToken: String) {
         val snapshot = ensureNonEmptyTrackPoints()
+        val effectiveTitle = _workoutSummary.value?.workoutName?.let { "$it - ${activeRoute.name}" }
+            ?: _workoutProgress.value?.workout?.name?.let { "$it - ${activeRoute.name}" }
+            ?: activeRoute.name
         _uiState.value = _uiState.value.copy(
             statusBannerMessage = "Uploading ${snapshot.size} GPS trackpoints to Strava API..."
         )
         viewModelScope.launch {
             val resultMsg = StravaSyncManager.uploadToStravaApi(
                 accessToken = accessToken,
-                routeName = activeRoute.name,
+                routeName = effectiveTitle,
                 trackPoints = snapshot
             )
             _uiState.value = _uiState.value.copy(statusBannerMessage = resultMsg)
@@ -778,7 +870,385 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    private fun tickWorkoutSecond(wInt: Int, rInt: Int, bpm: Int) {
+        val wp = _workoutProgress.value ?: return
+        if (wp.isPaused || wp.isCompleted) return
+
+        val workout = wp.workout
+        val currentStep = wp.currentStep ?: return
+
+        workoutWattsHistory.add(wInt)
+        currentStepWattsSamples.add(wInt)
+
+        // Calculate step target watts with ramp interpolation and intensity bias
+        val baseFrac = if (currentStep.targetPowerFractionHigh != null && currentStep.durationSeconds > 0) {
+            val progressRatio = wp.stepElapsedSeconds.toFloat() / currentStep.durationSeconds.toFloat()
+            currentStep.targetPowerFraction + (currentStep.targetPowerFractionHigh - currentStep.targetPowerFraction) * progressRatio
+        } else {
+            currentStep.targetPowerFraction
+        }
+        val biasedFrac = baseFrac * (1f + wp.intensityBiasPercent / 100f)
+        val stepTargetWatts = (biasedFrac * physics.ftpWatts).roundToInt()
+        val stepTargetRpm = currentStep.targetCadenceRpm ?: 90
+
+        val currentComp = WorkoutEngine.evaluateStepCompliance(wInt, stepTargetWatts)
+        val prompt = WorkoutEngine.pacingPrompt(wInt, stepTargetWatts, rInt, currentStep.targetCadenceRpm)
+
+        val nextStepElapsed = wp.stepElapsedSeconds + 1
+        val nextTotalElapsed = wp.totalElapsedSeconds + 1
+        val remainingStepSec = maxOf(0, currentStep.durationSeconds - nextStepElapsed)
+
+        // Audio countdown pips on 3, 2, 1 seconds
+        if (remainingStepSec in 1..3) {
+            tonePlayer.playCountdownPip()
+        }
+
+        // Ramp Test exhaustion failure detection (if past warmup)
+        var rampExhaustionTriggered = false
+        if (workout.category == WorkoutType.RAMP_TEST && wp.currentStepIndex > 0) {
+            if (rInt < 50 || (stepTargetWatts > 0 && wInt < (stepTargetWatts * 0.5f).roundToInt())) {
+                rampFailureSecondsCount++
+            } else {
+                rampFailureSecondsCount = maxOf(0, rampFailureSecondsCount - 1)
+            }
+            if (rampFailureSecondsCount >= 5) {
+                rampExhaustionTriggered = true
+            }
+        }
+
+        // Step completion or Ramp exhaustion
+        if (nextStepElapsed >= currentStep.durationSeconds || rampExhaustionTriggered) {
+            val stepAvgWatts = if (currentStepWattsSamples.isNotEmpty()) currentStepWattsSamples.average().toInt() else wInt
+            val stepFinalComp = WorkoutEngine.evaluateStepCompliance(stepAvgWatts, stepTargetWatts)
+            val starsEarned = WorkoutEngine.starsForCompliance(stepFinalComp)
+            val updatedStars = wp.earnedStars + starsEarned
+            currentStepWattsSamples.clear()
+            rampFailureSecondsCount = 0
+
+            val nextStepIndex = wp.currentStepIndex + 1
+            if (!rampExhaustionTriggered && nextStepIndex < workout.steps.size) {
+                // Transition to next interval step
+                tonePlayer.playStepTransitionChime()
+                val nextStep = workout.steps[nextStepIndex]
+                val nextBaseFrac = nextStep.targetPowerFraction
+                val nextBiasedFrac = nextBaseFrac * (1f + wp.intensityBiasPercent / 100f)
+                val nextTargetWatts = (nextBiasedFrac * physics.ftpWatts).roundToInt()
+                val nextTargetRpm = nextStep.targetCadenceRpm ?: 90
+
+                _workoutProgress.value = wp.copy(
+                    currentStepIndex = nextStepIndex,
+                    stepElapsedSeconds = 0,
+                    totalElapsedSeconds = nextTotalElapsed,
+                    targetWatts = nextTargetWatts,
+                    targetCadenceRpm = nextTargetRpm,
+                    currentStepCompliancePercent = 100f,
+                    earnedStars = updatedStars,
+                    pacingPrompt = "ON TARGET"
+                )
+
+                sendWorkoutStepToWatch(
+                    watts = nextTargetWatts,
+                    rpm = nextTargetRpm,
+                    remainingSec = nextStep.durationSeconds,
+                    zone = nextStep.zone,
+                    title = nextStep.name
+                )
+            } else {
+                // Workout Finished!
+                finishWorkout(wp.copy(earnedStars = updatedStars, totalElapsedSeconds = nextTotalElapsed))
+            }
+        } else {
+            // Normal 1-second progression
+            _workoutProgress.value = wp.copy(
+                stepElapsedSeconds = nextStepElapsed,
+                totalElapsedSeconds = nextTotalElapsed,
+                targetWatts = stepTargetWatts,
+                targetCadenceRpm = stepTargetRpm,
+                currentStepCompliancePercent = currentComp,
+                pacingPrompt = prompt
+            )
+
+            // Update watch step periodically and during countdown
+            if (remainingStepSec <= 5 || remainingStepSec % 2 == 0) {
+                sendWorkoutStepToWatch(
+                    watts = stepTargetWatts,
+                    rpm = stepTargetRpm,
+                    remainingSec = remainingStepSec,
+                    zone = currentStep.zone,
+                    title = currentStep.name
+                )
+            }
+        }
+    }
+
+    private fun finishWorkout(finalProgress: WorkoutProgress) {
+        val workout = finalProgress.workout
+        val wattsList = ArrayList(workoutWattsHistory)
+        val np = WorkoutEngine.computeNormalizedPower(wattsList)
+        val ifVal = WorkoutEngine.computeIntensityFactor(np, physics.ftpWatts.toInt())
+        val tss = WorkoutEngine.computeTss(finalProgress.totalElapsedSeconds, np, ifVal, physics.ftpWatts.toInt())
+
+        val detectedFtp = if (workout.category == WorkoutType.RAMP_TEST) {
+            WorkoutEngine.calculateRampTestFtp(wattsList)
+        } else {
+            null
+        }
+
+        // Calculate time spent in each power zone
+        val zoneTimes = mutableMapOf<Int, Int>()
+        for (w in wattsList) {
+            val z = CyclingPhysics.computePowerZone(w, physics.ftpWatts)
+            zoneTimes[z] = (zoneTimes[z] ?: 0) + 1
+        }
+
+        val avgWatts = if (wattsList.isNotEmpty()) wattsList.average().toInt() else 0
+        val maxWatts = wattsList.maxOrNull() ?: 0
+        val maxStars = workout.steps.size * 3
+        val complianceAvg = if (maxStars > 0) {
+            (finalProgress.earnedStars.toFloat() / maxStars.toFloat()) * 100f
+        } else {
+            100f
+        }
+
+        val summary = WorkoutSummary(
+            workoutName = workout.name,
+            category = workout.category,
+            totalTimeSeconds = finalProgress.totalElapsedSeconds,
+            avgWatts = avgWatts,
+            maxWatts = maxWatts,
+            normalizedPowerWatts = np,
+            intensityFactor = ifVal,
+            tss = tss,
+            timeInZones = zoneTimes,
+            overallCompliancePercent = complianceAvg,
+            totalStarsEarned = finalProgress.earnedStars,
+            maxStarsPossible = maxStars,
+            detectedFtpWatts = detectedFtp,
+            previousFtpWatts = physics.ftpWatts.toInt()
+        )
+
+        _workoutSummary.value = summary
+        _workoutProgress.value = finalProgress.copy(isCompleted = true)
+
+        tonePlayer.playWorkoutCompletedFanfare(viewModelScope)
+
+        sendControlMessageToWatch("END_WORKOUT")
+
+        _uiState.value = _uiState.value.copy(
+            isWorkoutActive = false,
+            isWorkoutSummaryModalOpen = true,
+            statusBannerMessage = "Workout Complete! ${summary.workoutName}: TSS $tss, NP ${np}W"
+        )
+    }
+
+    private fun sendWorkoutStepToWatch(watts: Int, rpm: Int, remainingSec: Int, zone: Int, title: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val nodeClient = Wearable.getNodeClient(getApplication<Application>())
+                val messageClient = Wearable.getMessageClient(getApplication<Application>())
+                val nodes = nodeClient.connectedNodes.await()
+                val payload = "WORKOUT_STEP:$watts|$rpm|$remainingSec|$zone|$title".toByteArray(Charsets.UTF_8)
+                for (node in nodes) {
+                    messageClient.sendMessage(node.id, "/lazyfitbike/control", payload).await()
+                    messageClient.sendMessage(node.id, "/velopulse/control", payload).await()
+                }
+            }
+        }
+    }
+
+    private fun sendControlMessageToWatch(cmd: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val nodeClient = Wearable.getNodeClient(getApplication<Application>())
+                val messageClient = Wearable.getMessageClient(getApplication<Application>())
+                val nodes = nodeClient.connectedNodes.await()
+                val payload = cmd.toByteArray(Charsets.UTF_8)
+                for (node in nodes) {
+                    messageClient.sendMessage(node.id, "/lazyfitbike/control", payload).await()
+                    messageClient.sendMessage(node.id, "/velopulse/control", payload).await()
+                }
+            }
+        }
+    }
+
+    fun startWorkout(workout: Workout) {
+        workoutWattsHistory.clear()
+        currentStepWattsSamples.clear()
+        rampFailureSecondsCount = 0
+
+        val firstStep = workout.steps.firstOrNull()
+        val targetW = if (firstStep != null) {
+            (firstStep.targetPowerFraction * physics.ftpWatts).roundToInt()
+        } else {
+            0
+        }
+        val targetR = firstStep?.targetCadenceRpm ?: 90
+
+        val progress = WorkoutProgress(
+            workout = workout,
+            currentStepIndex = 0,
+            stepElapsedSeconds = 0,
+            totalElapsedSeconds = 0,
+            targetWatts = targetW,
+            targetCadenceRpm = targetR,
+            currentStepCompliancePercent = 100f,
+            earnedStars = 0,
+            maxStarsPossible = workout.steps.size * 3,
+            intensityBiasPercent = 0,
+            isPaused = false,
+            isCompleted = false,
+            pacingPrompt = "ON TARGET"
+        )
+        _workoutProgress.value = progress
+        _workoutSummary.value = null
+
+        _uiState.value = _uiState.value.copy(
+            isWorkoutModalOpen = false,
+            isWorkoutSummaryModalOpen = false,
+            isWorkoutActive = true,
+            workoutName = workout.name,
+            workoutTargetWatts = targetW,
+            workoutTargetRpm = targetR,
+            workoutStepRemainingSec = firstStep?.durationSeconds ?: 0,
+            workoutStepIndex = 0,
+            workoutTotalSteps = workout.steps.size,
+            workoutStepName = firstStep?.name ?: "",
+            workoutCompliancePercent = 100f,
+            workoutEarnedStars = 0,
+            workoutPacingPrompt = "ON TARGET",
+            workoutIntensityBiasPercent = 0,
+            isWorkoutPaused = false,
+            statusBannerMessage = "Started workout: ${workout.name}"
+        )
+
+        tonePlayer.playStepTransitionChime()
+
+        if (firstStep != null) {
+            sendWorkoutStepToWatch(
+                watts = targetW,
+                rpm = targetR,
+                remainingSec = firstStep.durationSeconds,
+                zone = firstStep.zone,
+                title = firstStep.name
+            )
+        }
+    }
+
+    fun pauseWorkout() {
+        val wp = _workoutProgress.value ?: return
+        _workoutProgress.value = wp.copy(isPaused = true)
+        _uiState.value = _uiState.value.copy(isWorkoutPaused = true)
+    }
+
+    fun resumeWorkout() {
+        val wp = _workoutProgress.value ?: return
+        _workoutProgress.value = wp.copy(isPaused = false)
+        _uiState.value = _uiState.value.copy(isWorkoutPaused = false)
+    }
+
+    fun skipWorkoutStep() {
+        val wp = _workoutProgress.value ?: return
+        if (wp.isCompleted) return
+        val nextIndex = wp.currentStepIndex + 1
+        if (nextIndex < wp.workout.steps.size) {
+            val nextStep = wp.workout.steps[nextIndex]
+            val biasedFrac = nextStep.targetPowerFraction * (1f + wp.intensityBiasPercent / 100f)
+            val targetW = (biasedFrac * physics.ftpWatts).roundToInt()
+            val targetR = nextStep.targetCadenceRpm ?: 90
+
+            currentStepWattsSamples.clear()
+            rampFailureSecondsCount = 0
+
+            _workoutProgress.value = wp.copy(
+                currentStepIndex = nextIndex,
+                stepElapsedSeconds = 0,
+                targetWatts = targetW,
+                targetCadenceRpm = targetR,
+                currentStepCompliancePercent = 100f,
+                pacingPrompt = "ON TARGET"
+            )
+            tonePlayer.playStepTransitionChime()
+            sendWorkoutStepToWatch(targetW, targetR, nextStep.durationSeconds, nextStep.zone, nextStep.name)
+        } else {
+            finishWorkout(wp)
+        }
+    }
+
+    fun adjustWorkoutIntensity(deltaPercent: Int) {
+        val wp = _workoutProgress.value ?: return
+        val nextBias = (wp.intensityBiasPercent + deltaPercent).coerceIn(-50, 50)
+        val currentStep = wp.currentStep
+        val targetW = if (currentStep != null) {
+            val biasedFrac = currentStep.targetPowerFraction * (1f + nextBias / 100f)
+            (biasedFrac * physics.ftpWatts).roundToInt()
+        } else {
+            wp.targetWatts
+        }
+        _workoutProgress.value = wp.copy(
+            intensityBiasPercent = nextBias,
+            targetWatts = targetW
+        )
+        _uiState.value = _uiState.value.copy(
+            workoutIntensityBiasPercent = nextBias,
+            workoutTargetWatts = targetW
+        )
+    }
+
+    fun stopWorkout() {
+        _workoutProgress.value = null
+        currentStepWattsSamples.clear()
+        workoutWattsHistory.clear()
+        rampFailureSecondsCount = 0
+
+        _uiState.value = _uiState.value.copy(
+            isWorkoutActive = false,
+            isWorkoutPaused = false,
+            workoutName = "",
+            workoutTargetWatts = 0,
+            workoutTargetRpm = 0,
+            workoutStepRemainingSec = 0,
+            workoutStepIndex = 0,
+            workoutTotalSteps = 0,
+            workoutStepName = "",
+            workoutCompliancePercent = 100f,
+            workoutEarnedStars = 0,
+            workoutPacingPrompt = "",
+            workoutIntensityBiasPercent = 0
+        )
+        sendControlMessageToWatch("END_WORKOUT")
+    }
+
+    fun loadZwoFromXml(xml: String): Boolean {
+        val parsed = WorkoutEngine.parseZwoWorkout(xml)
+        return if (parsed != null) {
+            startWorkout(parsed)
+            true
+        } else {
+            _uiState.value = _uiState.value.copy(
+                statusBannerMessage = "Could not parse .ZWO file: check file format."
+            )
+            false
+        }
+    }
+
+    fun applyNewFtpAndSync(newFtp: Int) {
+        val safeFtp = newFtp.coerceIn(60, 550)
+        saveRiderProfile(
+            riderWeightKg = _uiState.value.riderWeightKg,
+            bikeWeightKg = _uiState.value.bikeWeightKg,
+            ftpWatts = safeFtp,
+            restingHr = _uiState.value.restingHr,
+            maxHr = _uiState.value.maxHr,
+            riderAge = _uiState.value.riderAge
+        )
+        _uiState.value = _uiState.value.copy(
+            isWorkoutSummaryModalOpen = false,
+            statusBannerMessage = "Updated FTP to $safeFtp W and synced to watch!"
+        )
+    }
+
     override fun onCleared() {
+        tonePlayer.release()
         receiver.stop()
         super.onCleared()
     }

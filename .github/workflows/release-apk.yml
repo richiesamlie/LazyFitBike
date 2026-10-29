@@ -2,6 +2,7 @@ name: Build & Publish LazyFitBike APKs
 
 on:
   push:
+    branches: [ "main" ]
     tags: [ "v*" ]
   workflow_dispatch:
 
@@ -22,18 +23,32 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Decode Release Signing Keystore
+      - name: Prepare Signing Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           mkdir -p keystore
-          echo "$KEYSTORE_BASE64" | base64 --decode > keystore/lazyfitbike.jks
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Decoding repository secret keystore..."
+            echo "$KEYSTORE_BASE64" | base64 --decode > keystore/lazyfitbike.jks
+          elif [ ! -f keystore/lazyfitbike.jks ]; then
+            echo "Generating default release signing keystore..."
+            keytool -genkeypair -v \
+              -keystore keystore/lazyfitbike.jks \
+              -alias lazyfitbike \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass lazyfitbike123 \
+              -keypass lazyfitbike123 \
+              -dname "CN=LazyFitBike, OU=Engineering, O=LazyFitBike, L=SanFrancisco, S=CA, C=US"
+          fi
 
       - name: Build Minified Release Phone and Galaxy Watch 4 APKs
         env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'lazyfitbike123' }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'lazyfitbike' }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'lazyfitbike123' }}
         run: |
           chmod +x gradlew
           ./gradlew :app:testDebugUnitTest :wear:testDebugUnitTest :app:assembleRelease :wear:assembleRelease
@@ -56,6 +71,6 @@ jobs:
           else
             gh release create "$TAG" LazyFitBike-phone.apk LazyFitBike-watch.apk \
               --title "LazyFitBike $TAG (Phone + Galaxy Watch 4)" \
-              --notes "R8-minified OTA build ($TAG) signed with shared project keystore." \
+              --notes "R8-minified OTA build ($TAG) with Structured Workout & Interval Training Engine." \
               --latest
           fi

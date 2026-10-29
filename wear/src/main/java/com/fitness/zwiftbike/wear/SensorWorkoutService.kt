@@ -15,6 +15,9 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,7 +40,13 @@ data class WatchWorkoutState(
     val bpm: Int = 0,
     val maxHr: Int = 190,
     val hrStatus: String = "IDLE", // "IDLE", "NO PERM", "MEASURING", "OFF WRIST", or "LOCKED"
-    val connectedNodes: Int = 0
+    val connectedNodes: Int = 0,
+    val isWorkoutActive: Boolean = false,
+    val targetWatts: Int = 0,
+    val targetRpm: Int = 0,
+    val stepRemainingSec: Int = 0,
+    val workoutZone: Int = 1,
+    val stepTitle: String = ""
 )
 
 /**
@@ -70,8 +79,11 @@ class SensorWorkoutService : Service(), SensorEventListener {
         const val ACTION_SET_MAX_HR = "com.fitness.zwiftbike.wear.ACTION_SET_MAX_HR"
         const val ACTION_TOGGLE_SIM = "com.fitness.zwiftbike.wear.ACTION_TOGGLE_SIM"
         const val ACTION_REFRESH_SENSORS = "com.fitness.zwiftbike.wear.ACTION_REFRESH_SENSORS"
+        const val ACTION_SET_WORKOUT_STEP = "com.fitness.zwiftbike.wear.ACTION_SET_WORKOUT_STEP"
+        const val ACTION_CLEAR_WORKOUT = "com.fitness.zwiftbike.wear.ACTION_CLEAR_WORKOUT"
         const val EXTRA_MODE = "extra_mode"
         const val EXTRA_MAX_HR = "extra_max_hr"
+        const val EXTRA_WORKOUT_PAYLOAD = "extra_workout_payload"
 
         private val _state = MutableStateFlow(WatchWorkoutState())
         val state: StateFlow<WatchWorkoutState> = _state.asStateFlow()
@@ -138,8 +150,68 @@ class SensorWorkoutService : Service(), SensorEventListener {
                 val nextSim = !_state.value.isSimulated
                 _state.value = _state.value.copy(isSimulated = nextSim)
             }
+            ACTION_SET_WORKOUT_STEP -> {
+                val payload = intent.getStringExtra(EXTRA_WORKOUT_PAYLOAD) ?: ""
+                handleWorkoutStep(payload)
+            }
+            ACTION_CLEAR_WORKOUT -> {
+                _state.value = _state.value.copy(
+                    isWorkoutActive = false,
+                    targetWatts = 0,
+                    targetRpm = 0,
+                    stepRemainingSec = 0,
+                    workoutZone = 1,
+                    stepTitle = ""
+                )
+            }
         }
         return START_STICKY
+    }
+
+    private fun handleWorkoutStep(payload: String) {
+        val parts = payload.split("|")
+        if (parts.size < 4) return
+        val watts = parts[0].toIntOrNull() ?: 0
+        val rpm = parts[1].toIntOrNull() ?: 0
+        val remainingSec = parts[2].toIntOrNull() ?: 0
+        val zone = parts[3].toIntOrNull() ?: 1
+        val title = if (parts.size >= 5) parts[4] else ""
+
+        _state.value = _state.value.copy(
+            isWorkoutActive = true,
+            targetWatts = watts,
+            targetRpm = rpm,
+            stepRemainingSec = remainingSec,
+            workoutZone = zone,
+            stepTitle = title
+        )
+
+        // Haptic transition cue on 3 seconds remaining
+        if (remainingSec == 3) {
+            triggerTransitionHaptic()
+        }
+    }
+
+    private fun triggerTransitionHaptic() {
+        runCatching {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vibratorManager?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+
+            if (vibrator != null && vibrator.hasVibrator()) {
+                val pattern = longArrayOf(0, 150, 100, 150)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(pattern, -1)
+                }
+            }
+        }
     }
 
     private fun applyModeChange(nextMode: String) {
