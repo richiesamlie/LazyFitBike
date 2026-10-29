@@ -451,7 +451,13 @@
     let visorMesh, hudCanvas, hudCtx, hudTexture;
 
     // Avatar parts for articulation
-    let cyclistGroup, leftLegGroup, rightLegGroup, crankGroup, frontWheel, rearWheel;
+    let cyclistGroup, crankGroup, frontWheel, rearWheel;
+    let leftLegData = null, rightLegData = null;
+    const _upVec = new THREE.Vector3(0, 1, 0);
+    const _tmpDir = new THREE.Vector3();
+    const _tmpQuat = new THREE.Quaternion();
+    const _vecA = new THREE.Vector3();
+    const _vecB = new THREE.Vector3();
 
     function initThree() {
       try {
@@ -649,155 +655,380 @@
       tex.needsUpdate = true;
     }
 
-    // Procedural Low-Poly Bicycle & Articulated Cyclist
+    // Helper to position & orient a 3D tube between two points
+    function createFrameTube(p1, p2, radius, mat) {
+      const v1 = new THREE.Vector3(p1[0], p1[1], p1[2]);
+      const v2 = new THREE.Vector3(p2[0], p2[1], p2[2]);
+      const dist = v1.distanceTo(v2);
+      const geo = new THREE.CylinderGeometry(radius, radius, dist, 8);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(v1).add(v2).multiplyScalar(0.5);
+      const dir = new THREE.Vector3().subVectors(v2, v1).normalize();
+      const quat = new THREE.Quaternion().setFromUnitVectors(_upVec, dir);
+      mesh.setRotationFromQuaternion(quat);
+      return mesh;
+    }
+
+    function alignCylinder(cylinderMesh, vA, vB) {
+      cylinderMesh.position.set((vA.x + vB.x) * 0.5, (vA.y + vB.y) * 0.5, (vA.z + vB.z) * 0.5);
+      _tmpDir.subVectors(vB, vA).normalize();
+      _tmpQuat.setFromUnitVectors(_upVec, _tmpDir);
+      cylinderMesh.setRotationFromQuaternion(_tmpQuat);
+    }
+
+    // Full Carbon Aero Road Bicycle & Sculpted Articulated Cyclist (IK)
     function createBicycleAndCyclist() {
       bikeGroup = new THREE.Group();
 
-      const frameMat = new THREE.MeshLambertMaterial({ color: 0xf97316 }); // Velodrome Orange
+      const frameMat = new THREE.MeshLambertMaterial({ color: 0xf97316 }); // Velodrome Orange Carbon
       const metalMat = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, roughness: 0.35, metalness: 0.7 });
-      const tireMat = new THREE.MeshLambertMaterial({ color: 0x18181b });
-      const skinMat = new THREE.MeshLambertMaterial({ color: 0xfde047 });
-      const kitMat = new THREE.MeshLambertMaterial({ color: 0xf97316 }); // Rider Jersey
-      const helmetMat = new THREE.MeshLambertMaterial({ color: 0xf4f4f5 }); // Aero Helmet
+      const carbonRimMat = new THREE.MeshLambertMaterial({ color: 0x27272a }); // Matte Carbon Rim
+      const tireMat = new THREE.MeshLambertMaterial({ color: 0x18181b }); // Grip Rubber
+      const skinMat = new THREE.MeshLambertMaterial({ color: 0xfdba74 }); // Warm natural skin tone
+      const kitMat = new THREE.MeshLambertMaterial({ color: 0xf97316 }); // Pro Jersey Orange
+      const bibMat = new THREE.MeshLambertMaterial({ color: 0x18181b }); // Black Bib Shorts
+      const helmetMat = new THREE.MeshLambertMaterial({ color: 0xf8fafc }); // Gloss White Aero Road Helmet
+      const visorMat = new THREE.MeshLambertMaterial({ color: 0x0ea5e9 }); // Wrap-around Cyan Eyewear
+      const sockMat = new THREE.MeshLambertMaterial({ color: 0xf8fafc }); // Pure White Cycling Socks
+      const shoeMat = new THREE.MeshLambertMaterial({ color: 0x27272a }); // Road Cycling Shoes
 
-      // Wheels in YZ plane with spokes
-      const wheelGeo = new THREE.TorusGeometry(0.35, 0.035, 8, 24);
-      wheelGeo.rotateY(Math.PI / 2);
-      const spokeGeo = new THREE.CylinderGeometry(0.006, 0.006, 0.68, 6);
-
+      // Deep-Section Carbon Wheels in YZ plane
       function buildWheelMesh() {
         const wg = new THREE.Group();
-        wg.add(new THREE.Mesh(wheelGeo, tireMat));
-        const s1 = new THREE.Mesh(spokeGeo, metalMat);
-        const s2 = new THREE.Mesh(spokeGeo, metalMat);
-        s2.rotation.x = Math.PI / 2;
-        wg.add(s1, s2);
+        // Outer Rubber Tire
+        const tireGeo = new THREE.TorusGeometry(0.35, 0.026, 10, 32);
+        tireGeo.rotateY(Math.PI / 2);
+        wg.add(new THREE.Mesh(tireGeo, tireMat));
+
+        // Deep-section carbon rim
+        const rimGeo = new THREE.TorusGeometry(0.305, 0.024, 8, 32);
+        rimGeo.rotateY(Math.PI / 2);
+        wg.add(new THREE.Mesh(rimGeo, carbonRimMat));
+
+        // Center hub shell
+        const hubGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.11, 8);
+        hubGeo.rotateZ(Math.PI / 2);
+        wg.add(new THREE.Mesh(hubGeo, metalMat));
+
+        // Brake rotor / cassette disc
+        const rotorGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.008, 12);
+        rotorGeo.rotateZ(Math.PI / 2);
+        const rotor = new THREE.Mesh(rotorGeo, metalMat);
+        rotor.position.set(-0.04, 0, 0);
+        wg.add(rotor);
+
+        // 8 Aerodynamic spokes
+        const spokeGeo = new THREE.CylinderGeometry(0.0035, 0.0035, 0.61, 4);
+        for (let s = 0; s < 4; s++) {
+          const sp = new THREE.Mesh(spokeGeo, metalMat);
+          sp.rotation.x = (s * Math.PI) / 4;
+          wg.add(sp);
+        }
         return wg;
       }
 
       rearWheel = buildWheelMesh();
-      rearWheel.position.set(0, 0.35, -0.5);
+      rearWheel.position.set(0, 0.35, -0.50);
       frontWheel = buildWheelMesh();
       frontWheel.position.set(0, 0.35, 0.55);
 
-      // Frame Tubes
-      const tubeGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.65, 6);
-      tubeGeo.rotateZ(Math.PI / 2);
+      // 1. Carbon Road Frame Geometry
+      const rearDropout = [0, 0.35, -0.50];
+      const frontDropout = [0, 0.35, 0.55];
+      const bb = [0, 0.33, -0.10];
+      const seatCluster = [0, 0.68, -0.16];
+      const headTubeBot = [0, 0.60, 0.42];
+      const headTubeTop = [0, 0.74, 0.38];
 
-      const topTube = new THREE.Mesh(tubeGeo, frameMat);
-      topTube.position.set(0, 0.65, 0.05);
-      topTube.rotation.x = 0.08;
+      // Main Triangle
+      const seatTube = createFrameTube(bb, seatCluster, 0.022, frameMat);
+      const downTube = createFrameTube(bb, headTubeBot, 0.027, frameMat);
+      const topTube = createFrameTube(seatCluster, headTubeTop, 0.020, frameMat);
+      const headTube = createFrameTube(headTubeBot, headTubeTop, 0.024, frameMat);
 
-      const downTube = new THREE.Mesh(tubeGeo, frameMat);
-      downTube.position.set(0, 0.45, 0.1);
-      downTube.rotation.x = -0.7;
+      // Rear Triangle (Dual Stays)
+      const leftChainstay = createFrameTube([-0.045, 0.35, -0.50], [-0.025, 0.33, -0.10], 0.013, frameMat);
+      const rightChainstay = createFrameTube([0.045, 0.35, -0.50], [0.025, 0.33, -0.10], 0.013, frameMat);
+      const leftSeatstay = createFrameTube([-0.045, 0.35, -0.50], [0, 0.68, -0.16], 0.012, frameMat);
+      const rightSeatstay = createFrameTube([0.045, 0.35, -0.50], [0, 0.68, -0.16], 0.012, frameMat);
 
-      const seatTube = new THREE.Mesh(tubeGeo, frameMat);
-      seatTube.position.set(0, 0.5, -0.15);
-      seatTube.rotation.x = 0.35;
+      // Front Aero Fork Blades
+      const leftFork = createFrameTube([-0.018, 0.60, 0.42], [-0.045, 0.35, 0.55], 0.016, frameMat);
+      const rightFork = createFrameTube([0.018, 0.60, 0.42], [0.045, 0.35, 0.55], 0.016, frameMat);
 
-      const saddleGeo = new THREE.BoxGeometry(0.12, 0.04, 0.22);
+      // Seatpost & Contoured Racing Saddle
+      const seatpost = createFrameTube([0, 0.68, -0.16], [0, 0.75, -0.18], 0.015, metalMat);
+      const saddleGeo = new THREE.CylinderGeometry(0.045, 0.065, 0.24, 8);
+      saddleGeo.rotateX(Math.PI / 2);
+      saddleGeo.scale(0.85, 0.35, 1.0);
       const saddle = new THREE.Mesh(saddleGeo, tireMat);
-      saddle.position.set(0, 0.74, -0.18);
+      saddle.position.set(0, 0.76, -0.19);
 
-      const handleGeo = new THREE.BoxGeometry(0.38, 0.04, 0.08);
-      const handlebars = new THREE.Mesh(handleGeo, metalMat);
-      handlebars.position.set(0, 0.76, 0.48);
+      // Stem & Curved Road Drop Handlebars
+      const stem = createFrameTube([0, 0.74, 0.38], [0, 0.77, 0.47], 0.018, metalMat);
+      const topsBar = createFrameTube([-0.19, 0.77, 0.47], [0.19, 0.77, 0.47], 0.015, metalMat);
+      const leftDrop = createFrameTube([-0.19, 0.77, 0.47], [-0.18, 0.71, 0.43], 0.014, metalMat);
+      const rightDrop = createFrameTube([0.19, 0.77, 0.47], [0.18, 0.71, 0.43], 0.014, metalMat);
+      const leftHood = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.04, 0.06), tireMat);
+      leftHood.position.set(-0.18, 0.78, 0.49);
+      const rightHood = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.04, 0.06), tireMat);
+      rightHood.position.set(0.18, 0.78, 0.49);
 
       // Crank & Pedals
       crankGroup = new THREE.Group();
-      crankGroup.position.set(0, 0.33, -0.12);
-      const crankAxle = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.22, 6), metalMat);
+      crankGroup.position.set(0, 0.33, -0.10);
+      const crankAxle = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.22, 8), metalMat);
       crankAxle.rotation.z = Math.PI / 2;
-      const crankArmGeo = new THREE.BoxGeometry(0.025, 0.14, 0.015);
+      const chainring = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.10, 0.008, 16), metalMat);
+      chainring.rotation.z = Math.PI / 2;
+      chainring.position.x = 0.08;
+
+      const crankArmGeo = new THREE.BoxGeometry(0.024, 0.165, 0.014);
       const leftArm = new THREE.Mesh(crankArmGeo, metalMat);
-      leftArm.position.set(-0.11, 0.05, 0);
+      leftArm.position.set(-0.115, 0.06, 0);
       const rightArm = new THREE.Mesh(crankArmGeo, metalMat);
-      rightArm.position.set(0.11, -0.05, 0);
-      crankGroup.add(crankAxle, leftArm, rightArm);
+      rightArm.position.set(0.115, -0.06, 0);
 
-      bikeGroup.add(rearWheel, frontWheel, topTube, downTube, seatTube, saddle, handlebars, crankGroup);
+      crankGroup.add(crankAxle, chainring, leftArm, rightArm);
 
-      // Articulated Rider
+      bikeGroup.add(
+        rearWheel, frontWheel,
+        seatTube, downTube, topTube, headTube,
+        leftChainstay, rightChainstay, leftSeatstay, rightSeatstay,
+        leftFork, rightFork,
+        seatpost, saddle,
+        stem, topsBar, leftDrop, rightDrop, leftHood, rightHood,
+        crankGroup
+      );
+
+      // 2. Sculpted Anatomical Cyclist
       cyclistGroup = new THREE.Group();
 
-      // Torso
-      const torsoGeo = new THREE.BoxGeometry(0.28, 0.42, 0.18);
-      const torso = new THREE.Mesh(torsoGeo, kitMat);
-      torso.position.set(0, 0.96, 0.04);
-      torso.rotation.x = 0.52; // Tucked aggressive riding posture
+      // Pelvis / Bib Shorts
+      const pelvisGeo = new THREE.SphereGeometry(0.14, 12, 10);
+      pelvisGeo.scale(1.0, 0.78, 0.95);
+      const pelvis = new THREE.Mesh(pelvisGeo, bibMat);
+      pelvis.position.set(0, 0.76, -0.17);
 
-      // Head & Aero Helmet
-      const headGeo = new THREE.SphereGeometry(0.11, 10, 8);
+      // S-Curved Anatomical Spine & Torso (Curved aerodynamic tuck)
+      const torsoLowerGeo = new THREE.SphereGeometry(0.13, 10, 8);
+      torsoLowerGeo.scale(0.98, 0.88, 0.95);
+      const torsoLower = new THREE.Mesh(torsoLowerGeo, kitMat);
+      torsoLower.position.set(0, 0.85, -0.11);
+
+      const torsoMidGeo = new THREE.SphereGeometry(0.14, 10, 8);
+      torsoMidGeo.scale(1.05, 0.92, 1.0);
+      const torsoMid = new THREE.Mesh(torsoMidGeo, kitMat);
+      torsoMid.position.set(0, 0.95, -0.01);
+
+      const torsoUpperGeo = new THREE.SphereGeometry(0.155, 12, 10);
+      torsoUpperGeo.scale(1.24, 0.86, 1.05);
+      const torsoUpper = new THREE.Mesh(torsoUpperGeo, kitMat);
+      torsoUpper.position.set(0, 1.04, 0.12);
+
+      // Jersey rear-pocket racing stripe
+      const pocketStripeGeo = new THREE.BoxGeometry(0.18, 0.04, 0.03);
+      const pocketStripe = new THREE.Mesh(pocketStripeGeo, sockMat);
+      pocketStripe.position.set(0, 0.88, -0.22);
+      pocketStripe.rotation.x = -0.3;
+
+      // Neck & Natural Skin-tone Head
+      const neckGeo = new THREE.CylinderGeometry(0.042, 0.046, 0.10, 8);
+      const neck = new THREE.Mesh(neckGeo, skinMat);
+      neck.position.set(0, 1.12, 0.20);
+      neck.rotation.x = 0.55;
+
+      const headGeo = new THREE.SphereGeometry(0.105, 12, 10);
       const head = new THREE.Mesh(headGeo, skinMat);
-      head.position.set(0, 1.18, 0.24);
+      head.position.set(0, 1.18, 0.27);
 
-      const helmetGeo = new THREE.ConeGeometry(0.13, 0.26, 8);
-      helmetGeo.rotateX(-Math.PI / 2);
+      // Sculpted Aerodynamic Road Helmet (Rounded aero teardrop with rear tail)
+      const helmetGeo = new THREE.SphereGeometry(0.13, 12, 10);
+      helmetGeo.scale(0.96, 0.72, 1.34);
       const helmet = new THREE.Mesh(helmetGeo, helmetMat);
-      helmet.position.set(0, 1.23, 0.22);
+      helmet.position.set(0, 1.22, 0.27);
+      helmet.rotation.x = 0.28;
 
-      // Arms reaching down to drops
-      const armGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.44, 6);
-      const leftArmMesh = new THREE.Mesh(armGeo, kitMat);
-      leftArmMesh.position.set(-0.16, 0.92, 0.26);
-      leftArmMesh.rotation.set(0.6, 0, 0.2);
+      // Dark aero vent channels on helmet
+      const ventGeo = new THREE.BoxGeometry(0.022, 0.02, 0.18);
+      const ventLeft = new THREE.Mesh(ventGeo, bibMat);
+      ventLeft.position.set(-0.045, 1.26, 0.27);
+      ventLeft.rotation.x = 0.28;
+      const ventRight = new THREE.Mesh(ventGeo, bibMat);
+      ventRight.position.set(0.045, 1.26, 0.27);
+      ventRight.rotation.x = 0.28;
 
-      const rightArmMesh = new THREE.Mesh(armGeo, kitMat);
-      rightArmMesh.position.set(0.16, 0.92, 0.26);
-      rightArmMesh.rotation.set(0.6, 0, -0.2);
+      // Wrap-around Eyewear Visor
+      const visorGeo = new THREE.CylinderGeometry(0.108, 0.108, 0.032, 10, 1, false, -Math.PI * 0.45, Math.PI * 0.9);
+      const eyewear = new THREE.Mesh(visorGeo, visorMat);
+      eyewear.position.set(0, 1.18, 0.28);
+      eyewear.rotation.y = Math.PI / 2;
 
-      // Articulated Thighs & Calves
-      const legGeo = new THREE.CylinderGeometry(0.045, 0.035, 0.34, 6);
-      leftLegGroup = new THREE.Group();
-      leftLegGroup.position.set(-0.13, 0.74, -0.12);
-      const leftThigh = new THREE.Mesh(legGeo, kitMat);
-      leftThigh.position.set(0, -0.15, 0.08);
-      leftThigh.rotation.x = 0.5;
-      leftLegGroup.add(leftThigh);
+      // Articulated Arms to Brake Hoods
+      const armUpperGeo = new THREE.CylinderGeometry(0.038, 0.032, 0.25, 8);
+      const armForeGeo = new THREE.CylinderGeometry(0.030, 0.024, 0.26, 8);
+      const gloveGeo = new THREE.BoxGeometry(0.045, 0.035, 0.06);
 
-      rightLegGroup = new THREE.Group();
-      rightLegGroup.position.set(0.13, 0.74, -0.12);
-      const rightThigh = new THREE.Mesh(legGeo, kitMat);
-      rightThigh.position.set(0, -0.15, 0.08);
-      rightThigh.rotation.x = 0.5;
-      rightLegGroup.add(rightThigh);
+      // Left Arm
+      const leftUpperArm = new THREE.Mesh(armUpperGeo, kitMat);
+      const leftForearm = new THREE.Mesh(armForeGeo, skinMat);
+      const leftGlove = new THREE.Mesh(gloveGeo, bibMat);
+      alignCylinder(leftUpperArm, new THREE.Vector3(-0.17, 1.04, 0.14), new THREE.Vector3(-0.19, 0.88, 0.31));
+      alignCylinder(leftForearm, new THREE.Vector3(-0.19, 0.88, 0.31), new THREE.Vector3(-0.18, 0.79, 0.49));
+      leftGlove.position.set(-0.18, 0.79, 0.49);
 
-      cyclistGroup.add(torso, head, helmet, leftArmMesh, rightArmMesh, leftLegGroup, rightLegGroup);
+      // Right Arm
+      const rightUpperArm = new THREE.Mesh(armUpperGeo, kitMat);
+      const rightForearm = new THREE.Mesh(armForeGeo, skinMat);
+      const rightGlove = new THREE.Mesh(gloveGeo, bibMat);
+      alignCylinder(rightUpperArm, new THREE.Vector3(0.17, 1.04, 0.14), new THREE.Vector3(0.19, 0.88, 0.31));
+      alignCylinder(rightForearm, new THREE.Vector3(0.19, 0.88, 0.31), new THREE.Vector3(0.18, 0.79, 0.49));
+      rightGlove.position.set(0.18, 0.79, 0.49);
+
+      cyclistGroup.add(
+        pelvis, torsoLower, torsoMid, torsoUpper, pocketStripe,
+        neck, head, helmet, ventLeft, ventRight, eyewear,
+        leftUpperArm, leftForearm, leftGlove,
+        rightUpperArm, rightForearm, rightGlove
+      );
+
+      // 3. 2-Bone Analytical IK Legs (Thigh -> Knee -> Calf -> Sock -> Shoe)
+      function buildLegMesh(side) {
+        const legGroup = new THREE.Group();
+        const thighGeo = new THREE.CylinderGeometry(0.048, 0.038, 0.35, 10);
+        const thighMesh = new THREE.Mesh(thighGeo, bibMat);
+
+        const kneeGeo = new THREE.SphereGeometry(0.040, 10, 8);
+        const kneeMesh = new THREE.Mesh(kneeGeo, skinMat);
+
+        const calfGeo = new THREE.CylinderGeometry(0.036, 0.026, 0.34, 10);
+        const calfMesh = new THREE.Mesh(calfGeo, skinMat);
+
+        const sockGeo = new THREE.CylinderGeometry(0.028, 0.026, 0.10, 10);
+        const sockMesh = new THREE.Mesh(sockGeo, sockMat);
+
+        const shoeGeo = new THREE.BoxGeometry(0.065, 0.042, 0.13);
+        const shoeMesh = new THREE.Mesh(shoeGeo, shoeMat);
+
+        legGroup.add(thighMesh, kneeMesh, calfMesh, sockMesh, shoeMesh);
+        cyclistGroup.add(legGroup);
+
+        return {
+          side: side,
+          thighMesh: thighMesh,
+          kneeMesh: kneeMesh,
+          calfMesh: calfMesh,
+          sockMesh: sockMesh,
+          shoeMesh: shoeMesh,
+          hip: new THREE.Vector3(side * 0.115, 0.75, -0.17),
+          L1: 0.35,
+          L2: 0.34
+        };
+      }
+
+      leftLegData = buildLegMesh(-1);
+      rightLegData = buildLegMesh(1);
+
       bikeGroup.add(cyclistGroup);
 
-      // Rotate bikeGroup by Math.PI so it faces -Z (Forward ahead of rider)
+      // Rotate bikeGroup by Math.PI so it faces -Z (Forward along the road)
       bikeGroup.rotation.y = Math.PI;
       bikeGroup.position.set(0, 0, 0);
       scene.add(bikeGroup);
     }
 
-    // AI Pacer Bots in 3D
+    // Analytical Law of Cosines 2-Bone IK Leg Solver
+    function updateLegIK(leg, crankAngle) {
+      if (!leg) return;
+      const phi = crankAngle + (leg.side > 0 ? 0 : Math.PI);
+      const R = 0.165; // Crank arm radius
+      const Py = 0.33 + R * Math.sin(phi);
+      const Pz = -0.10 + R * Math.cos(phi);
+      const Px = leg.side * 0.115;
+
+      const Hy = leg.hip.y;
+      const Hz = leg.hip.z;
+      const Hx = leg.hip.x;
+
+      const Dy = Py - Hy;
+      const Dz = Pz - Hz;
+      const d = Math.sqrt(Dy * Dy + Dz * Dz);
+
+      const L1 = leg.L1;
+      const L2 = leg.L2;
+
+      // Law of Cosines for hip-to-thigh angle offset
+      let cosAlpha = (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d);
+      cosAlpha = Math.max(-1, Math.min(1, cosAlpha));
+      const alpha = Math.acos(cosAlpha);
+
+      // Angle from Hip to Pedal
+      const beta = Math.atan2(Dy, Dz);
+
+      // Forward knee bend towards +Z
+      const theta1 = beta + alpha;
+      const Ky = Hy + L1 * Math.sin(theta1);
+      const Kz = Hz + L1 * Math.cos(theta1);
+      const Kx = Hx;
+
+      // Align Thigh from Hip to Knee
+      _vecA.set(Hx, Hy, Hz);
+      _vecB.set(Kx, Ky, Kz);
+      alignCylinder(leg.thighMesh, _vecA, _vecB);
+
+      // Position Knee joint
+      leg.kneeMesh.position.set(Kx, Ky, Kz);
+
+      // Align Calf from Knee to Pedal
+      _vecA.set(Kx, Ky, Kz);
+      _vecB.set(Px, Py, Pz);
+      alignCylinder(leg.calfMesh, _vecA, _vecB);
+
+      // Align White Sock at the lower portion of the calf
+      _vecA.set(Kx * 0.25 + Px * 0.75, Ky * 0.25 + Py * 0.75, Kz * 0.25 + Pz * 0.75);
+      _vecB.set(Px, Py, Pz);
+      alignCylinder(leg.sockMesh, _vecA, _vecB);
+
+      // Position Road Shoe with slight dynamic ankle flex
+      leg.shoeMesh.position.set(Px, Py - 0.015, Pz + 0.02);
+      leg.shoeMesh.rotation.x = -Math.sin(phi) * 0.18;
+    }
+
+    // AI Pacer Bots in 3D (Sleek road silhouettes)
     function createBotPacers() {
       botsGroup = new THREE.Group();
 
-      const botWheelGeo = new THREE.TorusGeometry(0.3, 0.03, 6, 14);
+      const botWheelGeo = new THREE.TorusGeometry(0.32, 0.025, 8, 20);
       botWheelGeo.rotateY(Math.PI / 2);
+      const botDark = new THREE.MeshLambertMaterial({ color: 0x18181b });
+      const botHelmetMat = new THREE.MeshLambertMaterial({ color: 0xf8fafc });
 
       for (let b = 0; b < bots.length; b++) {
         const botData = bots[b];
         const botMesh = new THREE.Group();
-
         const botBody = new THREE.Group();
         const botMat = new THREE.MeshLambertMaterial({ color: botData.color });
-        const botDark = new THREE.MeshLambertMaterial({ color: 0x18181b });
 
-        const frame = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.35, 0.9), botMat);
-        frame.position.y = 0.45;
+        // Sleek aero diamond frame
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.28, 0.82), botMat);
+        frame.position.y = 0.44;
+
+        // Dual deep wheels
         const w1 = new THREE.Mesh(botWheelGeo, botDark);
-        w1.position.set(0, 0.32, -0.4);
+        w1.position.set(0, 0.33, -0.42);
         const w2 = new THREE.Mesh(botWheelGeo, botDark);
-        w2.position.set(0, 0.32, 0.45);
-        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.38, 0.16), botMat);
-        torso.position.set(0, 0.88, 0.02);
-        torso.rotation.x = 0.5;
-        const helm = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 6), new THREE.MeshLambertMaterial({ color: 0xf4f4f5 }));
-        helm.position.set(0, 1.12, 0.2);
+        w2.position.set(0, 0.33, 0.45);
+
+        // Curved aerodynamic torso
+        const torso = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), botMat);
+        torso.scale.set(1.1, 0.82, 1.4);
+        torso.position.set(0, 0.90, 0.05);
+        torso.rotation.x = 0.45;
+
+        // Vented road helmet (no cone)
+        const helm = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), botHelmetMat);
+        helm.scale.set(0.95, 0.75, 1.3);
+        helm.position.set(0, 1.10, 0.22);
 
         botBody.add(frame, w1, w2, torso, helm);
         botBody.rotation.y = Math.PI; // Face -Z
@@ -872,7 +1103,32 @@
       camera.add(visorMesh);
     }
 
-    // High-DPI 2D Visor HUD Painter
+    // Canvas helper for rounded glass panels with smooth borders
+    function drawGlassPanel(ctx, x, y, w, h, r, borderColor, bgAlpha) {
+      ctx.save();
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(x, y, w, h, r);
+      } else {
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+      }
+      ctx.fillStyle = 'rgba(9, 9, 11, ' + (bgAlpha !== undefined ? bgAlpha : 0.78) + ')';
+      ctx.fill();
+      ctx.strokeStyle = borderColor || 'rgba(255, 255, 255, 0.14)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // High-DPI 2D Visor HUD Painter: Layout A (Open Center Viewport)
     function renderVisorHud(now) {
       if (!hudCtx) return;
       const w = hudCanvas.width;
@@ -880,382 +1136,297 @@
 
       hudCtx.clearRect(0, 0, w, h);
 
-      // Determine active zone color & accent
       const pColor = ZONE_COLORS[state.powerZone] || '#F97316';
       const hrColor = ZONE_COLORS[state.hrZone] || '#FB7185';
       const pZoneName = ZONE_NAMES[state.powerZone] || 'Z3 TEMPO';
+      const gradeColor = state.gradePercent > 4.0 ? '#F43F5E' : (state.gradePercent > 0.0 ? '#FBBF24' : '#34D399');
 
-      // 1. Subtle Holographic Visor Frame / Outer Reticle
-      hudCtx.save();
-      hudCtx.lineWidth = 1.5;
-      hudCtx.strokeStyle = 'rgba(148, 163, 184, 0.22)';
-
-      // Outer visor border brackets
-      hudCtx.beginPath();
-      // Top-left bracket
-      hudCtx.moveTo(40, 90);
-      hudCtx.lineTo(40, 40);
-      hudCtx.lineTo(240, 40);
-      // Top-right bracket
-      hudCtx.moveTo(w - 240, 40);
-      hudCtx.lineTo(w - 40, 40);
-      hudCtx.lineTo(w - 40, 90);
-      // Bottom brackets
-      hudCtx.moveTo(40, h - 90);
-      hudCtx.lineTo(40, h - 40);
-      hudCtx.lineTo(240, h - 40);
-      hudCtx.moveTo(w - 240, h - 40);
-      hudCtx.lineTo(w - 40, h - 40);
-      hudCtx.lineTo(w - 40, h - 90);
-      hudCtx.stroke();
-
-      // Subtle ambient zone glow on visor top edge
-      const edgeGrad = hudCtx.createLinearGradient(0, 0, 0, 80);
-      edgeGrad.addColorStop(0, pColor);
-      edgeGrad.addColorStop(1, 'rgba(0,0,0,0)');
-      hudCtx.fillStyle = edgeGrad;
-      hudCtx.globalAlpha = 0.18;
-      hudCtx.fillRect(100, 30, w - 200, 50);
-      hudCtx.globalAlpha = 1.0;
-      hudCtx.restore();
-
-      // 2. CENTER RETICLE: Radial Power Tachometer & Speed Readout
-      const cx = w * 0.5;
-      const cy = h * 0.48;
-      const arcRadius = 145;
-
-      // Tachometer background track
-      hudCtx.save();
-      hudCtx.beginPath();
-      hudCtx.arc(cx, cy, arcRadius, Math.PI * 0.8, Math.PI * 2.2, false);
-      hudCtx.lineWidth = 12;
-      hudCtx.strokeStyle = 'rgba(39, 39, 42, 0.65)';
-      hudCtx.lineCap = 'round';
-      hudCtx.stroke();
-
-      // Dynamic Active Watts Arc
       const maxDisplayWatts = Math.max(450, state.ftpWatts * 1.5);
       const powerFraction = Math.min(1.0, Math.max(0.0, state.watts / maxDisplayWatts));
-      const endAngle = Math.PI * 0.8 + (Math.PI * 1.4) * powerFraction;
 
-      hudCtx.beginPath();
-      hudCtx.arc(cx, cy, arcRadius, Math.PI * 0.8, endAngle, false);
-      hudCtx.lineWidth = 14;
-      hudCtx.strokeStyle = pColor;
-      hudCtx.shadowColor = pColor;
-      hudCtx.shadowBlur = 18;
-      hudCtx.stroke();
-      hudCtx.restore();
+      const cx = w * 0.5;
 
-      // Target Power needle bracket (if workout active)
-      if (state.isWorkoutActive && state.workoutTargetWatts > 0) {
-        const targetFrac = Math.min(1.0, Math.max(0.0, state.workoutTargetWatts / maxDisplayWatts));
-        const targetAng = Math.PI * 0.8 + (Math.PI * 1.4) * targetFrac;
-        hudCtx.save();
-        hudCtx.beginPath();
-        hudCtx.arc(cx, cy, arcRadius, targetAng - 0.04, targetAng + 0.04, false);
-        hudCtx.lineWidth = 22;
-        hudCtx.strokeStyle = '#FFFFFF';
-        hudCtx.shadowColor = '#38BDF8';
-        hudCtx.shadowBlur = 14;
-        hudCtx.stroke();
-        hudCtx.restore();
-      }
-
-      // Inner Tick marks & Horizon crosshairs
-      hudCtx.save();
-      hudCtx.strokeStyle = 'rgba(244, 244, 245, 0.35)';
-      hudCtx.lineWidth = 1;
-      hudCtx.beginPath();
-      hudCtx.moveTo(cx - 50, cy);
-      hudCtx.lineTo(cx - 20, cy);
-      hudCtx.moveTo(cx + 20, cy);
-      hudCtx.lineTo(cx + 50, cy);
-      hudCtx.stroke();
-
-      // Center Big Readouts: Watts & Zone Pill
-      hudCtx.textAlign = 'center';
-
-      // Pacing Prompt Pill (if workout active)
-      if (state.isWorkoutActive && state.workoutTargetWatts > 0) {
-        hudCtx.save();
-        const promptBg = state.workoutPacingPrompt.indexOf('ON TARGET') !== -1 ? 'rgba(52, 211, 153, 0.25)' : 'rgba(249, 115, 22, 0.25)';
-        const promptBorder = state.workoutPacingPrompt.indexOf('ON TARGET') !== -1 ? '#34D399' : '#F97316';
-        hudCtx.fillStyle = promptBg;
-        hudCtx.fillRect(cx - 170, cy - 100, 340, 28);
-        hudCtx.strokeStyle = promptBorder;
-        hudCtx.lineWidth = 1.5;
-        hudCtx.strokeRect(cx - 170, cy - 100, 340, 28);
-        hudCtx.fillStyle = '#FFFFFF';
-        hudCtx.font = 'bold 13px sans-serif';
-        hudCtx.fillText('TARGET ' + state.workoutTargetWatts + 'W (' + state.workoutTargetRpm + ' RPM)  •  ' + state.workoutPacingPrompt, cx, cy - 81);
-        hudCtx.restore();
-      }
-
-      hudCtx.fillStyle = pColor;
-      hudCtx.font = '900 68px sans-serif';
-      hudCtx.shadowColor = pColor;
-      hudCtx.shadowBlur = 14;
-      hudCtx.fillText(String(state.watts), cx, cy - 8);
-      hudCtx.shadowBlur = 0;
-
-      hudCtx.fillStyle = '#F4F4F5';
-      hudCtx.font = 'bold 20px sans-serif';
-      hudCtx.fillText('WATTS', cx, cy + 24);
-
-      // Zone Pill
-      hudCtx.fillStyle = 'rgba(9, 9, 11, 0.82)';
-      hudCtx.fillRect(cx - 75, cy + 38, 150, 26);
-      hudCtx.strokeStyle = pColor;
-      hudCtx.lineWidth = 1.5;
-      hudCtx.strokeRect(cx - 75, cy + 38, 150, 26);
-      hudCtx.fillStyle = pColor;
-      hudCtx.font = 'bold 13px sans-serif';
-      hudCtx.fillText(pZoneName, cx, cy + 56);
-
-      // Speed Readout (Directly below tachometer)
-      hudCtx.fillStyle = '#FFFFFF';
-      hudCtx.font = '900 44px sans-serif';
-      hudCtx.fillText(state.speedKmh.toFixed(1), cx, cy + 130);
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 15px sans-serif';
-      hudCtx.fillText('KM / H', cx, cy + 154);
-
-      // 3. LEFT WING: Effort & Physiological Metrics
-      const leftX = 140;
-      const leftY = 120;
-      const wingW = 320;
-      const wingH = 460;
-
-      // Left Pod Glass Frame
-      hudCtx.fillStyle = 'rgba(9, 9, 11, 0.65)';
-      hudCtx.fillRect(leftX, leftY, wingW, wingH);
-      hudCtx.strokeStyle = 'rgba(39, 39, 42, 0.85)';
-      hudCtx.lineWidth = 1.5;
-      hudCtx.strokeRect(leftX, leftY, wingW, wingH);
-
-      // Corner accent in Zone color
-      hudCtx.fillStyle = pColor;
-      hudCtx.fillRect(leftX, leftY, 6, wingH);
-
-      // Left Header
-      hudCtx.textAlign = 'left';
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 13px sans-serif';
-      hudCtx.fillText('EFFORT & VITALS', leftX + 24, leftY + 36);
-
-      // Cadence (RPM)
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('CADENCE', leftX + 24, leftY + 85);
-      hudCtx.fillStyle = '#F4F4F5';
-      hudCtx.font = '900 42px sans-serif';
-      hudCtx.fillText(String(state.rpm), leftX + 24, leftY + 132);
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 15px sans-serif';
-      hudCtx.fillText('RPM', leftX + 115, leftY + 132);
-
-      // Cadence Mini Arc Bar
-      const rpmFraction = Math.min(1.0, state.rpm / 120);
-      hudCtx.fillStyle = 'rgba(39, 39, 42, 0.8)';
-      hudCtx.fillRect(leftX + 24, leftY + 148, wingW - 48, 8);
-      hudCtx.fillStyle = '#38BDF8';
-      hudCtx.fillRect(leftX + 24, leftY + 148, (wingW - 48) * rpmFraction, 8);
-
-      // Heart Rate (BPM) with cardiac pulse
-      const hrBpm = state.bpm > 0 ? state.bpm : '--';
-      const heartPulse = 1.0 + (Math.sin(now * 0.009) * 0.12);
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('HEART RATE', leftX + 24, leftY + 200);
-
-      hudCtx.save();
-      hudCtx.fillStyle = hrColor;
-      hudCtx.font = '900 42px sans-serif';
-      hudCtx.shadowColor = hrColor;
-      hudCtx.shadowBlur = 10;
-      hudCtx.fillText(String(hrBpm), leftX + 24, leftY + 248);
-      hudCtx.shadowBlur = 0;
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 15px sans-serif';
-      hudCtx.fillText('BPM', leftX + 120, leftY + 248);
-      hudCtx.restore();
-
-      // Cardiac rhythm waveform
-      hudCtx.strokeStyle = hrColor;
-      hudCtx.lineWidth = 2.5;
-      hudCtx.beginPath();
-      const waveStartX = leftX + 24;
-      const waveY = leftY + 276;
-      hudCtx.moveTo(waveStartX, waveY);
-      hudCtx.lineTo(waveStartX + 40, waveY);
-      hudCtx.lineTo(waveStartX + 55, waveY - 14 * heartPulse);
-      hudCtx.lineTo(waveStartX + 70, waveY + 12 * heartPulse);
-      hudCtx.lineTo(waveStartX + 85, waveY);
-      hudCtx.lineTo(waveStartX + wingW - 48, waveY);
-      hudCtx.stroke();
-
-      // W/KG & FTP
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('POWER / WEIGHT', leftX + 24, leftY + 330);
-      hudCtx.fillStyle = '#F4F4F5';
-      hudCtx.font = '900 34px sans-serif';
-      hudCtx.fillText(state.wattsPerKg.toFixed(1) + ' W/KG', leftX + 24, leftY + 372);
-
-      hudCtx.fillStyle = '#71717A';
-      hudCtx.font = 'bold 14px sans-serif';
-      hudCtx.fillText('TARGET FTP: ' + state.ftpWatts + ' W', leftX + 24, leftY + 415);
-
-      // 4. RIGHT WING: Navigation & Course Telemetry
-      const rightX = w - leftX - wingW;
-      const rightY = leftY;
-
-      // Right Pod Glass Frame
-      hudCtx.fillStyle = 'rgba(9, 9, 11, 0.65)';
-      hudCtx.fillRect(rightX, rightY, wingW, wingH);
-      hudCtx.strokeStyle = 'rgba(39, 39, 42, 0.85)';
-      hudCtx.lineWidth = 1.5;
-      hudCtx.strokeRect(rightX, rightY, wingW, wingH);
-
-      // Right Accent Bar
-      hudCtx.fillStyle = '#F97316';
-      hudCtx.fillRect(rightX + wingW - 6, rightY, 6, wingH);
-
-      // Right Header
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 13px sans-serif';
-      hudCtx.fillText('COURSE TELEMETRY', rightX + 24, rightY + 36);
-
-      // Distance
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('DISTANCE', rightX + 24, rightY + 85);
-      hudCtx.fillStyle = '#F4F4F5';
-      hudCtx.font = '900 42px sans-serif';
-      hudCtx.fillText((state.distanceMeters / 1000).toFixed(2), rightX + 24, rightY + 132);
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 15px sans-serif';
-      hudCtx.fillText('KM', rightX + 160, rightY + 132);
-
-      // Incline Grade (%)
-      const gradeColor = state.gradePercent > 4.0 ? '#F43F5E' : (state.gradePercent > 0.0 ? '#FBBF24' : '#34D399');
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('ROAD GRADE', rightX + 24, rightY + 200);
-      hudCtx.fillStyle = gradeColor;
-      hudCtx.font = '900 42px sans-serif';
-      const gradeSign = state.gradePercent >= 0 ? '+' : '';
-      hudCtx.fillText(gradeSign + state.gradePercent.toFixed(1) + '%', rightX + 24, rightY + 248);
-
-      // Elevation Profile Mini Ribbon
-      hudCtx.fillStyle = 'rgba(39, 39, 42, 0.7)';
-      hudCtx.fillRect(rightX + 24, rightY + 280, wingW - 48, 55);
-      hudCtx.strokeStyle = '#F97316';
-      hudCtx.lineWidth = 2.5;
-      hudCtx.beginPath();
-      const pX = rightX + 24;
-      const pY = rightY + 325;
-      hudCtx.moveTo(pX, pY);
-      hudCtx.lineTo(pX + 40, pY - 10);
-      hudCtx.lineTo(pX + 90, pY - 32);
-      hudCtx.lineTo(pX + 150, pY - 20);
-      hudCtx.lineTo(pX + 210, pY - 42);
-      hudCtx.lineTo(pX + wingW - 48, pY - 30);
-      hudCtx.stroke();
-
-      // Current Rider dot on profile
-      const profDotX = pX + ((state.distanceMeters % 4000) / 4000) * (wingW - 48);
-      hudCtx.fillStyle = '#FFFFFF';
-      hudCtx.beginPath();
-      hudCtx.arc(profDotX, pY - 24, 5, 0, Math.PI * 2);
-      hudCtx.fill();
-
-      // Elapsed Ride Time
-      const mins = Math.floor(state.elapsedSeconds / 60);
-      const secs = state.elapsedSeconds % 60;
-      const timeStr = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('ELAPSED TIME', rightX + 24, rightY + 375);
-      hudCtx.fillStyle = '#F4F4F5';
-      hudCtx.font = '900 32px sans-serif';
-      hudCtx.fillText(timeStr, rightX + 24, rightY + 415);
-
-      // 5. TOP HEADER: ROUTE BADGE OR STRUCTURED WORKOUT RIBBON
+      // 1. TOP-CENTER FLOATING PILL (Workout Ribbon or Route Pill)
       if (state.isWorkoutActive) {
+        const pillW = 660;
+        const pillH = 68;
+        const pillX = cx - pillW / 2;
+        const pillY = 56;
+        const isPulse = (state.workoutStepRemainingSec <= 3 || state.isWorkoutPaused) && Math.sin(now * 0.015) > 0;
+        const borderColor = isPulse ? '#F43F5E' : pColor;
+
+        drawGlassPanel(hudCtx, pillX, pillY, pillW, pillH, 34, borderColor, 0.88);
+
+        // Top accent line in target zone color
         hudCtx.save();
-        const ribbonW = 680;
-        const ribbonH = 70;
-        const rx = cx - ribbonW / 2;
-        const ry = 40;
-
-        // Base frame
-        hudCtx.fillStyle = 'rgba(9, 9, 11, 0.88)';
-        hudCtx.fillRect(rx, ry, ribbonW, ribbonH);
-        const isPulse = state.workoutStepRemainingSec <= 3 && Math.sin(now * 0.015) > 0;
-        hudCtx.strokeStyle = isPulse ? '#F43F5E' : pColor;
-        hudCtx.lineWidth = isPulse ? 2.5 : 1.5;
-        hudCtx.strokeRect(rx, ry, ribbonW, ribbonH);
-
-        // Top accent strip in target zone color
-        hudCtx.fillStyle = pColor;
-        hudCtx.fillRect(rx, ry, ribbonW, 4);
+        hudCtx.fillStyle = isPulse ? '#F43F5E' : pColor;
+        hudCtx.beginPath();
+        hudCtx.roundRect ? hudCtx.roundRect(pillX + 30, pillY, pillW - 60, 3.5, 2) : hudCtx.rect(pillX + 30, pillY, pillW - 60, 3.5);
+        hudCtx.fill();
+        hudCtx.restore();
 
         // Left Section: Step info
+        hudCtx.save();
         hudCtx.textAlign = 'left';
         hudCtx.fillStyle = '#A1A1AA';
         hudCtx.font = 'bold 11px sans-serif';
-        hudCtx.fillText(
-          'STEP ' + (state.workoutStepIndex + 1) + ' OF ' + state.workoutTotalSteps + (state.workoutIntensityBiasPercent !== 0 ? ' (' + (state.workoutIntensityBiasPercent > 0 ? '+' : '') + state.workoutIntensityBiasPercent + '%)' : ''),
-          rx + 18,
-          ry + 24
-        );
+        const biasText = state.workoutIntensityBiasPercent !== 0 ? ' (' + (state.workoutIntensityBiasPercent > 0 ? '+' : '') + state.workoutIntensityBiasPercent + '%)' : '';
+        hudCtx.fillText('STEP ' + (state.workoutStepIndex + 1) + ' OF ' + state.workoutTotalSteps + biasText, pillX + 28, pillY + 26);
+
         hudCtx.fillStyle = '#FFFFFF';
         hudCtx.font = '900 16px sans-serif';
-        hudCtx.fillText(state.workoutStepName.toUpperCase(), rx + 18, ry + 46);
+        hudCtx.fillText(state.workoutStepName.toUpperCase(), pillX + 28, pillY + 45);
 
-        // Center Section: Big Countdown Timer
+        hudCtx.fillStyle = '#38BDF8';
+        hudCtx.font = 'bold 11px sans-serif';
+        hudCtx.fillText('TARGET ' + state.workoutTargetWatts + 'W @ ' + state.workoutTargetRpm + ' RPM', pillX + 28, pillY + 60);
+        hudCtx.restore();
+
+        // Center Section: Prominent Countdown Timer
+        hudCtx.save();
         hudCtx.textAlign = 'center';
         const remMins = Math.floor(state.workoutStepRemainingSec / 60);
         const remSecs = state.workoutStepRemainingSec % 60;
         const remStr = String(remMins).padStart(2, '0') + ':' + String(remSecs).padStart(2, '0');
         hudCtx.fillStyle = isPulse ? '#F43F5E' : '#FFFFFF';
         hudCtx.font = '900 32px sans-serif';
-        hudCtx.fillText(remStr, cx, ry + 44);
-        hudCtx.fillStyle = '#A1A1AA';
+        hudCtx.fillText(remStr, cx, pillY + 42);
+
+        hudCtx.fillStyle = isPulse ? '#F43F5E' : '#A1A1AA';
         hudCtx.font = 'bold 10px sans-serif';
-        hudCtx.fillText(state.isWorkoutPaused ? 'PAUSED' : 'REMAINING', cx, ry + 60);
+        hudCtx.fillText(state.isWorkoutPaused ? 'PAUSED' : 'REMAINING', cx, pillY + 58);
+        hudCtx.restore();
 
         // Right Section: Earned Stars & Compliance
+        hudCtx.save();
         hudCtx.textAlign = 'right';
         hudCtx.fillStyle = '#FBBF24';
-        hudCtx.font = 'bold 16px sans-serif';
-        hudCtx.fillText('★ ' + state.workoutEarnedStars, rx + ribbonW - 18, ry + 26);
-        hudCtx.fillStyle = '#34D399';
-        hudCtx.font = '900 15px sans-serif';
-        hudCtx.fillText(state.workoutCompliancePercent.toFixed(0) + '% COMPL', rx + ribbonW - 18, ry + 48);
+        hudCtx.font = 'bold 15px sans-serif';
+        hudCtx.fillText('★ ' + state.workoutEarnedStars, pillX + pillW - 28, pillY + 26);
 
+        hudCtx.fillStyle = '#34D399';
+        hudCtx.font = '900 14px sans-serif';
+        hudCtx.fillText(state.workoutCompliancePercent.toFixed(0) + '% COMPL', pillX + pillW - 28, pillY + 44);
+
+        if (state.workoutPacingPrompt) {
+          hudCtx.fillStyle = state.workoutPacingPrompt.indexOf('ON TARGET') !== -1 ? '#34D399' : '#F97316';
+          hudCtx.font = 'bold 10px sans-serif';
+          hudCtx.fillText(state.workoutPacingPrompt, pillX + pillW - 28, pillY + 60);
+        }
         hudCtx.restore();
       } else {
-        hudCtx.textAlign = 'center';
-        hudCtx.fillStyle = 'rgba(9, 9, 11, 0.75)';
-        hudCtx.fillRect(cx - 210, 48, 420, 36);
-        hudCtx.strokeStyle = 'rgba(39, 39, 42, 0.9)';
-        hudCtx.lineWidth = 1.5;
-        hudCtx.strokeRect(cx - 210, 48, 420, 36);
+        const pillW = 430;
+        const pillH = 44;
+        const pillX = cx - pillW / 2;
+        const pillY = 56;
+        drawGlassPanel(hudCtx, pillX, pillY, pillW, pillH, 22, 'rgba(255, 255, 255, 0.16)', 0.82);
 
-        // Live GPS Dot
+        // Live GPS Pulsing Dot
+        hudCtx.save();
         hudCtx.fillStyle = '#34D399';
         hudCtx.beginPath();
-        hudCtx.arc(cx - 186, 66, 5, 0, Math.PI * 2);
+        hudCtx.arc(pillX + 28, pillY + 22, 5, 0, Math.PI * 2);
         hudCtx.fill();
 
+        hudCtx.textAlign = 'left';
         hudCtx.fillStyle = '#F4F4F5';
-        hudCtx.font = 'bold 14px sans-serif';
-        hudCtx.fillText(state.activeRouteName.toUpperCase(), cx + 10, 72);
+        hudCtx.font = 'bold 13px sans-serif';
+        hudCtx.fillText(state.activeRouteName.toUpperCase(), pillX + 44, pillY + 26);
+
+        hudCtx.textAlign = 'right';
+        hudCtx.fillStyle = gradeColor;
+        hudCtx.font = '900 13px sans-serif';
+        const gSign = state.gradePercent >= 0 ? '+' : '';
+        hudCtx.fillText(gSign + state.gradePercent.toFixed(1) + '%', pillX + pillW - 24, pillY + 26);
+        hudCtx.restore();
       }
 
+      // 2. BOTTOM-LEFT FLOATING EFFORT CAPSULE (Watts, Zone, Cadence, HR)
+      const leftCapsuleX = 76;
+      const leftCapsuleY = 485;
+      const capsuleW = 350;
+      const capsuleH = 160;
+
+      drawGlassPanel(hudCtx, leftCapsuleX, leftCapsuleY, capsuleW, capsuleH, 24, 'rgba(255, 255, 255, 0.14)', 0.80);
+
+      // Corner accent indicator
+      hudCtx.save();
+      hudCtx.fillStyle = pColor;
+      hudCtx.beginPath();
+      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX, leftCapsuleY + 24, 4, 60, 2) : hudCtx.rect(leftCapsuleX, leftCapsuleY + 24, 4, 60);
+      hudCtx.fill();
+
+      // Capsule Header
+      hudCtx.textAlign = 'left';
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('EFFORT & VITALS', leftCapsuleX + 22, leftCapsuleY + 26);
+
+      // Hero Watts
+      hudCtx.fillStyle = pColor;
+      hudCtx.font = '900 58px sans-serif';
+      hudCtx.shadowColor = pColor;
+      hudCtx.shadowBlur = 12;
+      hudCtx.fillText(String(state.watts), leftCapsuleX + 22, leftCapsuleY + 84);
+      hudCtx.shadowBlur = 0;
+
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('W  (' + state.wattsPerKg.toFixed(1) + ' W/KG)', leftCapsuleX + 24, leftCapsuleY + 104);
+
+      // Zone Pill
+      hudCtx.fillStyle = 'rgba(9, 9, 11, 0.85)';
+      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX + 22, leftCapsuleY + 114, 112, 22, 6) : hudCtx.rect(leftCapsuleX + 22, leftCapsuleY + 114, 112, 22);
+      hudCtx.fill();
+      hudCtx.strokeStyle = pColor;
+      hudCtx.lineWidth = 1;
+      hudCtx.stroke();
+      hudCtx.fillStyle = pColor;
+      hudCtx.font = 'bold 11px sans-serif';
+      hudCtx.textAlign = 'center';
+      hudCtx.fillText(pZoneName, leftCapsuleX + 78, leftCapsuleY + 129);
+
+      // Horizontal Power Progress Bar along bottom of watts section
+      const barW = 112;
+      hudCtx.fillStyle = 'rgba(39, 39, 42, 0.85)';
+      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX + 22, leftCapsuleY + 144, barW, 5, 2.5) : hudCtx.rect(leftCapsuleX + 22, leftCapsuleY + 144, barW, 5);
+      hudCtx.fill();
+      hudCtx.fillStyle = pColor;
+      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX + 22, leftCapsuleY + 144, barW * powerFraction, 5, 2.5) : hudCtx.rect(leftCapsuleX + 22, leftCapsuleY + 144, barW * powerFraction, 5);
+      hudCtx.fill();
+
+      // Target power marker tick if in workout
+      if (state.isWorkoutActive && state.workoutTargetWatts > 0) {
+        const targetFrac = Math.min(1.0, Math.max(0.0, state.workoutTargetWatts / maxDisplayWatts));
+        hudCtx.fillStyle = '#FFFFFF';
+        hudCtx.fillRect(leftCapsuleX + 22 + barW * targetFrac - 1, leftCapsuleY + 142, 2.5, 9);
+      }
+
+      // Vertical Divider
+      hudCtx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+      hudCtx.lineWidth = 1;
+      hudCtx.beginPath();
+      hudCtx.moveTo(leftCapsuleX + 160, leftCapsuleY + 24);
+      hudCtx.lineTo(leftCapsuleX + 160, leftCapsuleY + 146);
+      hudCtx.stroke();
+
+      // Cadence (RPM)
+      hudCtx.textAlign = 'left';
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 11px sans-serif';
+      hudCtx.fillText('CADENCE', leftCapsuleX + 182, leftCapsuleY + 44);
+
+      hudCtx.fillStyle = '#38BDF8';
+      hudCtx.font = '900 30px sans-serif';
+      hudCtx.fillText(String(state.rpm), leftCapsuleX + 182, leftCapsuleY + 76);
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('RPM', leftCapsuleX + 248, leftCapsuleY + 74);
+
+      // Heart Rate (BPM)
+      const hrBpm = state.bpm > 0 ? state.bpm : '--';
+      const heartPulse = 1.0 + (Math.sin(now * 0.009) * 0.12);
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 11px sans-serif';
+      hudCtx.fillText('HEART RATE', leftCapsuleX + 182, leftCapsuleY + 104);
+
+      hudCtx.fillStyle = hrColor;
+      hudCtx.font = '900 30px sans-serif';
+      hudCtx.fillText(String(hrBpm), leftCapsuleX + 182, leftCapsuleY + 136);
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('BPM', leftCapsuleX + 250, leftCapsuleY + 134);
+
+      // Mini Cardiac waveform
+      hudCtx.strokeStyle = hrColor;
+      hudCtx.lineWidth = 1.8;
+      hudCtx.beginPath();
+      const waveX = leftCapsuleX + 182;
+      const waveY = leftCapsuleY + 148;
+      hudCtx.moveTo(waveX, waveY);
+      hudCtx.lineTo(waveX + 28, waveY);
+      hudCtx.lineTo(waveX + 38, waveY - 8 * heartPulse);
+      hudCtx.lineTo(waveX + 48, waveY + 8 * heartPulse);
+      hudCtx.lineTo(waveX + 58, waveY);
+      hudCtx.lineTo(waveX + 140, waveY);
+      hudCtx.stroke();
+      hudCtx.restore();
+
+      // 3. BOTTOM-RIGHT FLOATING COURSE CAPSULE (Speed, Distance, Grade, Elevation)
+      const rightCapsuleX = w - leftCapsuleX - capsuleW;
+      const rightCapsuleY = leftCapsuleY;
+
+      drawGlassPanel(hudCtx, rightCapsuleX, rightCapsuleY, capsuleW, capsuleH, 24, 'rgba(255, 255, 255, 0.14)', 0.80);
+
+      // Header
+      hudCtx.save();
+      hudCtx.textAlign = 'left';
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('COURSE TELEMETRY', rightCapsuleX + 22, rightCapsuleY + 26);
+
+      // Hero Speed
+      hudCtx.fillStyle = '#FFFFFF';
+      hudCtx.font = '900 54px sans-serif';
+      hudCtx.fillText(state.speedKmh.toFixed(1), rightCapsuleX + 22, rightCapsuleY + 82);
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('KM / H', rightCapsuleX + 24, rightCapsuleY + 102);
+
+      // Distance & Elapsed Time
+      const mins = Math.floor(state.elapsedSeconds / 60);
+      const secs = state.elapsedSeconds % 60;
+      const timeStr = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+      hudCtx.fillStyle = '#F4F4F5';
+      hudCtx.font = 'bold 14px sans-serif';
+      hudCtx.fillText((state.distanceMeters / 1000).toFixed(2) + ' KM', rightCapsuleX + 24, rightCapsuleY + 128);
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 12px sans-serif';
+      hudCtx.fillText('TIME ' + timeStr, rightCapsuleX + 24, rightCapsuleY + 146);
+
+      // Vertical Divider
+      hudCtx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+      hudCtx.lineWidth = 1;
+      hudCtx.beginPath();
+      hudCtx.moveTo(rightCapsuleX + 175, rightCapsuleY + 24);
+      hudCtx.lineTo(rightCapsuleX + 175, rightCapsuleY + 146);
+      hudCtx.stroke();
+
+      // Road Grade
+      hudCtx.fillStyle = '#A1A1AA';
+      hudCtx.font = 'bold 11px sans-serif';
+      hudCtx.fillText('ROAD GRADE', rightCapsuleX + 195, rightCapsuleY + 44);
+
+      hudCtx.fillStyle = gradeColor;
+      hudCtx.font = '900 28px sans-serif';
+      const gradeSign = state.gradePercent >= 0 ? '+' : '';
+      hudCtx.fillText(gradeSign + state.gradePercent.toFixed(1) + '%', rightCapsuleX + 195, rightCapsuleY + 78);
+
+      // Mini Elevation Profile Ribbon
+      const pX = rightCapsuleX + 195;
+      const pY = rightCapsuleY + 138;
+      const profW = 125;
+
+      hudCtx.fillStyle = 'rgba(39, 39, 42, 0.65)';
+      hudCtx.roundRect ? hudCtx.roundRect(pX, rightCapsuleY + 95, profW, 46, 6) : hudCtx.rect(pX, rightCapsuleY + 95, profW, 46);
+      hudCtx.fill();
+
+      hudCtx.strokeStyle = '#F97316';
+      hudCtx.lineWidth = 2;
+      hudCtx.beginPath();
+      hudCtx.moveTo(pX, pY - 6);
+      hudCtx.lineTo(pX + 25, pY - 14);
+      hudCtx.lineTo(pX + 55, pY - 32);
+      hudCtx.lineTo(pX + 85, pY - 20);
+      hudCtx.lineTo(pX + profW, pY - 34);
+      hudCtx.stroke();
+
+      // Rider dot on elevation profile
+      const profDotX = pX + ((state.distanceMeters % 4000) / 4000) * profW;
+      hudCtx.fillStyle = '#FFFFFF';
+      hudCtx.beginPath();
+      hudCtx.arc(profDotX, pY - 22, 4, 0, Math.PI * 2);
+      hudCtx.fill();
       hudCtx.restore();
 
       // Signal Three.js that texture needs update
@@ -1382,9 +1553,12 @@
           if (crankGroup) {
             crankGroup.rotation.x = state.crankAngleRad;
           }
-          if (leftLegGroup && rightLegGroup) {
-            leftLegGroup.rotation.x = Math.sin(state.crankAngleRad) * 0.45;
-            rightLegGroup.rotation.x = Math.sin(state.crankAngleRad + Math.PI) * 0.45;
+          if (leftLegData && rightLegData) {
+            updateLegIK(leftLegData, state.crankAngleRad);
+            updateLegIK(rightLegData, state.crankAngleRad);
+          }
+          if (cyclistGroup) {
+            cyclistGroup.rotation.z = Math.sin(state.crankAngleRad) * 0.035;
           }
           if (bikeGroup) {
             // Bike lean into corners (facing -Z)
@@ -1414,10 +1588,11 @@
             camera.position.set(0, 0, 0);
             camera.rotation.set(-0.32 + cameraInertiaPitch * 0.5, 0, cameraInertiaRoll * 0.5);
           } else {
-            // Default CHASE Mode: Behind (+Z) and slightly above rider at z = 0, looking toward -Z
-            cameraRig.position.set(bikeGroup.position.x * 0.75, 1.85, 3.8);
+            // Dynamic 3/4 CHASE Mode: Lateral offset (+0.65m X) and slightly elevated,
+            // revealing bicycle frame, deep wheels, curved spine, and 2-segment leg articulation
+            cameraRig.position.set(bikeGroup.position.x * 0.75 + 0.65, 1.68, 3.35);
             camera.position.set(0, 0, 0);
-            camera.rotation.set(-0.10 + cameraInertiaPitch, 0, cameraInertiaRoll);
+            camera.rotation.set(-0.11 + cameraInertiaPitch, -0.16 + cameraInertiaRoll * 0.5, cameraInertiaRoll);
           }
 
           // Subtle visor inertia lag relative to camera
