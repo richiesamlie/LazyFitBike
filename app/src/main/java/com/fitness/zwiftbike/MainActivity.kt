@@ -1,9 +1,14 @@
 package com.fitness.zwiftbike
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
@@ -48,25 +53,42 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.ln
+import kotlin.math.pow
+import kotlin.math.tan
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -124,6 +146,82 @@ private class MapJsBridge(
     }
 }
 
+private object OsmTileProxy {
+    private const val USER_AGENT = "LazyFitBike/1.3.2 (https://github.com/richiesamlie/LazyFitBike)"
+    private const val REFERER = "https://github.com/richiesamlie/LazyFitBike"
+    private val tileUrlRegex = Regex("""/(\d+)/(\d+)/(\d+)\.png""")
+
+    fun lonToTileX(lon: Double, zoom: Int): Double {
+        return ((lon + 180.0) / 360.0) * 2.0.pow(zoom.toDouble())
+    }
+
+    fun latToTileY(lat: Double, zoom: Int): Double {
+        val rad = lat * PI / 180.0
+        return ((1.0 - ln(tan(rad) + 1.0 / cos(rad)) / PI) / 2.0) * 2.0.pow(zoom.toDouble())
+    }
+
+    fun interceptIfTileRequest(context: Context, request: WebResourceRequest?): WebResourceResponse? {
+        val url = request?.url?.toString() ?: return null
+        if (!url.contains("tile.openstreetmap.org") && !url.contains("basemaps.cartocdn.com")) {
+            return null
+        }
+        val match = tileUrlRegex.find(url) ?: return null
+        val z = match.groupValues[1].toIntOrNull() ?: return null
+        val x = match.groupValues[2].toIntOrNull() ?: return null
+        val y = match.groupValues[3].toIntOrNull() ?: return null
+
+        val bytes = fetchTileBytes(context, z, x, y) ?: return null
+        return WebResourceResponse(
+            "image/png",
+            null,
+            200,
+            "OK",
+            mapOf(
+                "Access-Control-Allow-Origin" to "*",
+                "Cache-Control" to "max-age=604800"
+            ),
+            ByteArrayInputStream(bytes)
+        )
+    }
+
+    fun fetchTileBytes(context: Context, z: Int, x: Int, y: Int): ByteArray? {
+        val cacheDir = File(context.cacheDir, "osm_tiles")
+        if (!cacheDir.exists()) cacheDir.mkdirs()
+        val cacheFile = File(cacheDir, "${z}_${x}_${y}.png")
+        if (cacheFile.exists() && cacheFile.length() > 256L) {
+            runCatching { return cacheFile.readBytes() }
+        }
+
+        val candidateUrls = listOf(
+            "https://tile.openstreetmap.org/$z/$x/$y.png",
+            "https://a.basemaps.cartocdn.com/rastertiles/voyager/$z/$x/$y.png"
+        )
+        for (urlStr in candidateUrls) {
+            val downloaded = runCatching {
+                val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    setRequestProperty("User-Agent", USER_AGENT)
+                    setRequestProperty("Referer", REFERER)
+                    setRequestProperty("Accept", "image/png,image/*;q=0.8,*/*;q=0.5")
+                }
+                if (conn.responseCode in 200..299 && conn.getHeaderField("x-blocked") == null) {
+                    conn.inputStream.use { it.readBytes() }.takeIf { it.size > 256 }
+                } else {
+                    null
+                }
+            }.getOrNull()
+
+            if (downloaded != null) {
+                runCatching { cacheFile.writeBytes(downloaded) }
+                return downloaded
+            }
+        }
+        return null
+    }
+}
+
 private val BgCarbonHud = Color(0xE609090B)
 private val BgControlDark = Color(0xFF18181B)
 private val BorderZinc = Color(0xFF27272A)
@@ -135,6 +233,32 @@ private val SignalEmerald = Color(0xFF34D399)
 private val SignalAmber = Color(0xFFFBBF24)
 
 private val TabularStyle = TextStyle(fontFeatureSettings = "tnum")
+
+private fun pushRoutePolylineToWebView(view: WebView?, polylineJson: String) {
+    val escaped = polylineJson.replace("'", "\\'")
+    view?.evaluateJavascript(
+        "if(window.setRoutePolyline){window.setRoutePolyline('$escaped');}",
+        null
+    )
+}
+
+private fun pushRideStateToWebView(view: WebView?, state: RideUiState) {
+    val jsCall = String.format(
+        Locale.US,
+        "if(window.updateRideState){window.updateRideState(%.2f,%d,%d,%.2f,%.2f,'%s',%.6f,%.6f,%.3f,%b);}",
+        state.speedKmh,
+        state.rpm,
+        state.watts,
+        state.slopeGradePercent,
+        state.distanceMeters,
+        state.cameraMode,
+        state.currentLat,
+        state.currentLon,
+        state.currentCurvature,
+        state.isMapModalOpen
+    )
+    view?.evaluateJavascript(jsCall, null)
+}
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -160,13 +284,10 @@ fun VeloPulseCockpitScreen(
 ) {
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var stravaAccessToken by remember { mutableStateOf("") }
+    val latestState by rememberUpdatedState(state)
 
     LaunchedEffect(state.activeRouteId, state.activeRoutePolylineJson) {
-        val escaped = state.activeRoutePolylineJson.replace("'", "\\'")
-        webViewRef?.evaluateJavascript(
-            "if(window.setRoutePolyline){window.setRoutePolyline('$escaped');}",
-            null
-        )
+        pushRoutePolylineToWebView(webViewRef, state.activeRoutePolylineJson)
     }
 
     LaunchedEffect(
@@ -181,21 +302,7 @@ fun VeloPulseCockpitScreen(
         state.currentCurvature,
         state.isMapModalOpen
     ) {
-        val jsCall = String.format(
-            Locale.US,
-            "if(window.updateRideState){window.updateRideState(%.2f,%d,%d,%.2f,%.2f,'%s',%.6f,%.6f,%.3f,%b);}",
-            state.speedKmh,
-            state.rpm,
-            state.watts,
-            state.slopeGradePercent,
-            state.distanceMeters,
-            state.cameraMode,
-            state.currentLat,
-            state.currentLon,
-            state.currentCurvature,
-            state.isMapModalOpen
-        )
-        webViewRef?.evaluateJavascript(jsCall, null)
+        pushRideStateToWebView(webViewRef, state)
     }
 
     Box(
@@ -206,22 +313,37 @@ fun VeloPulseCockpitScreen(
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
+                val appCtx = context.applicationContext
                 WebView(context).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    settings.userAgentString = "LazyFitBike/1.3.2 (https://github.com/richiesamlie/LazyFitBike)"
                     addJavascriptInterface(MapJsBridge(onRequestOsrmRoute), "AndroidBridge")
                     webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: WebResourceRequest?
+                        ): WebResourceResponse? {
+                            return OsmTileProxy.interceptIfTileRequest(appCtx, request)
+                                ?: super.shouldInterceptRequest(view, request)
+                        }
+
                         override fun onPageFinished(view: WebView?, url: String?) {
-                            val escaped = state.activeRoutePolylineJson.replace("'", "\\'")
-                            view?.evaluateJavascript(
-                                "if(window.setRoutePolyline){window.setRoutePolyline('$escaped');}",
-                                null
-                            )
+                            val current = latestState
+                            pushRoutePolylineToWebView(view, current.activeRoutePolylineJson)
+                            pushRideStateToWebView(view, current)
                         }
                     }
                     loadUrl("file:///android_asset/world3d.html")
                     webViewRef = this
                 }
+            },
+            update = { view ->
+                webViewRef = view
             }
         )
 
@@ -1107,16 +1229,73 @@ private fun MiniGpsRouteCanvas(
     lat: Double,
     lon: Double
 ) {
+    val context = LocalContext.current
     val pts = waypoints.ifEmpty { GpsRouteEngine.presetRoutes.first().waypoints }
+    val zoom = 12
+    val tileX = floor(OsmTileProxy.lonToTileX(lon, zoom)).toInt()
+    val tileY = floor(OsmTileProxy.latToTileY(lat, zoom)).toInt()
+    var tileBitmap by remember(tileX, tileY) { mutableStateOf<ImageBitmap?>(null) }
+
+    LaunchedEffect(tileX, tileY) {
+        val loaded = withContext(Dispatchers.IO) {
+            val bytes = OsmTileProxy.fetchTileBytes(context.applicationContext, zoom, tileX, tileY)
+            if (bytes != null) {
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            } else {
+                null
+            }
+        }
+        if (loaded != null) {
+            tileBitmap = loaded
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(64.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF0F172A))
+            .background(Color(0xFF1E293B))
             .border(1.dp, BorderZinc, RoundedCornerShape(8.dp))
     ) {
-        Canvas(modifier = Modifier.fillMaxSize().padding(6.dp)) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val bmp = tileBitmap
+            if (bmp != null) {
+                drawImage(
+                    image = bmp,
+                    dstOffset = IntOffset.Zero,
+                    dstSize = IntSize(size.width.toInt().coerceAtLeast(1), size.height.toInt().coerceAtLeast(1)),
+                    alpha = 0.78f
+                )
+                drawRect(color = Color(0x4409090B))
+            } else {
+                val step = 18.dp.toPx()
+                var gx = step
+                while (gx < size.width) {
+                    drawLine(
+                        color = Color(0x3394A3B8),
+                        start = Offset(gx, 0f),
+                        end = Offset(gx, size.height),
+                        strokeWidth = 1f
+                    )
+                    gx += step
+                }
+                var gy = step
+                while (gy < size.height) {
+                    drawLine(
+                        color = Color(0x3394A3B8),
+                        start = Offset(0f, gy),
+                        end = Offset(size.width, gy),
+                        strokeWidth = 1f
+                    )
+                    gy += step
+                }
+            }
+
+            val pad = 6.dp.toPx()
+            val innerW = (size.width - pad * 2f).coerceAtLeast(1f)
+            val innerH = (size.height - pad * 2f).coerceAtLeast(1f)
+
             if (pts.size >= 2) {
                 val minLat = pts.minOf { it.lat }
                 val maxLat = pts.maxOf { it.lat }
@@ -1127,21 +1306,26 @@ private fun MiniGpsRouteCanvas(
 
                 val path = Path()
                 pts.forEachIndexed { idx, wp ->
-                    val x = (((wp.lon - minLon) / lonSpan) * size.width).toFloat()
-                    val y = ((1.0 - (wp.lat - minLat) / latSpan) * size.height).toFloat()
+                    val x = pad + (((wp.lon - minLon) / lonSpan) * innerW).toFloat()
+                    val y = pad + ((1.0 - (wp.lat - minLat) / latSpan) * innerH).toFloat()
                     if (idx == 0) path.moveTo(x, y) else path.lineTo(x, y)
                 }
                 drawPath(
                     path = path,
-                    color = Color(0xFF475569),
-                    style = Stroke(width = 5f, cap = StrokeCap.Round)
+                    color = Color(0xCC09090B),
+                    style = Stroke(width = 8f, cap = StrokeCap.Round)
+                )
+                drawPath(
+                    path = path,
+                    color = AccentOrange,
+                    style = Stroke(width = 4.5f, cap = StrokeCap.Round)
                 )
 
-                val rx = (((lon - minLon) / lonSpan) * size.width).toFloat().coerceIn(0f, size.width)
-                val ry = ((1.0 - (lat - minLat) / latSpan) * size.height).toFloat().coerceIn(0f, size.height)
+                val rx = (pad + (((lon - minLon) / lonSpan) * innerW).toFloat()).coerceIn(pad, size.width - pad)
+                val ry = (pad + ((1.0 - (lat - minLat) / latSpan) * innerH).toFloat()).coerceIn(pad, size.height - pad)
                 drawCircle(
                     color = Color.White,
-                    radius = 7f,
+                    radius = 7.5f,
                     center = Offset(rx, ry)
                 )
                 drawCircle(
@@ -1154,11 +1338,12 @@ private fun MiniGpsRouteCanvas(
         Text(
             text = String.format(Locale.US, "%.4f, %.4f", lat, lon),
             style = TabularStyle,
-            color = TextMutedZinc,
+            color = TextPrimaryWhite,
             fontSize = 10.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Bold,
             modifier = Modifier
                 .align(Alignment.BottomStart)
+                .background(Color(0xAA09090B), RoundedCornerShape(topEnd = 6.dp))
                 .padding(horizontal = 6.dp, vertical = 2.dp)
         )
     }

@@ -63,7 +63,7 @@ data class RideUiState(
     val isMapModalOpen: Boolean = false,
     val isStravaModalOpen: Boolean = false,
     val isUpdateModalOpen: Boolean = false,
-    val installedVersionName: String = "v1.3.1",
+    val installedVersionName: String = "v1.3.2",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
@@ -137,9 +137,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     private fun resolveInstalledVersion(app: Application): String {
         return runCatching {
             val info = app.packageManager.getPackageInfo(app.packageName, 0)
-            val vName = info.versionName ?: "1.3.1"
+            val vName = info.versionName ?: "1.3.2"
             if (vName.startsWith("v")) vName else "v$vName"
-        }.getOrDefault("v1.3.1")
+        }.getOrDefault("v1.3.2")
     }
 
     init {
@@ -620,6 +620,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         val nextCam = when (_uiState.value.cameraMode) {
             "CHASE" -> "POV"
             "POV" -> "DRONE"
+            "DRONE" -> "MAP"
             else -> "CHASE"
         }
         _uiState.value = _uiState.value.copy(cameraMode = nextCam)

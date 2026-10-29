@@ -11,15 +11,16 @@
     #fullmap-container {
       display: none;
       position: absolute;
-      top: 76px;
-      bottom: 76px;
-      left: 310px;
-      right: 16px;
+      top: 118px;
+      bottom: 78px;
+      left: 316px;
+      right: 14px;
       border-radius: 14px;
-      border: 2px solid #27272A;
-      background: #090D16;
+      border: 2px solid #F97316;
+      background: #0F172A;
       overflow: hidden;
       z-index: 5;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.65);
     }
     #fullmap-canvas {
       width: 100%;
@@ -120,19 +121,21 @@
         state.isMapModalOpen = shouldShowMap;
         fullMapContainer.style.display = shouldShowMap ? 'block' : 'none';
         resize();
+        setTimeout(resize, 50);
       }
     };
 
     function resize() {
-      canvas.width = window.innerWidth || 800;
-      canvas.height = window.innerHeight || 450;
+      canvas.width = Math.max(320, window.innerWidth || document.documentElement.clientWidth || 800);
+      canvas.height = Math.max(200, window.innerHeight || document.documentElement.clientHeight || 450);
       if (state.isMapModalOpen) {
-        fullMapCanvas.width = fullMapContainer.clientWidth || 440;
-        fullMapCanvas.height = fullMapContainer.clientHeight || 280;
+        fullMapCanvas.width = Math.max(240, fullMapContainer.clientWidth || (canvas.width - 340));
+        fullMapCanvas.height = Math.max(160, fullMapContainer.clientHeight || (canvas.height - 200));
       }
     }
     window.addEventListener('resize', resize);
     resize();
+    setTimeout(resize, 100);
 
     // Web Mercator projection helpers for OpenStreetMap tiles
     function lonToTileX(lon, zoom) {
@@ -161,12 +164,29 @@
       const wrappedX = ((x % maxTile) + maxTile) % maxTile;
       if (y < 0 || y >= maxTile) return null;
       const key = z + '/' + wrappedX + '/' + y;
-      if (osmTileCache[key]) return osmTileCache[key];
+      const existing = osmTileCache[key];
+      if (existing) {
+        if (existing.failedAt && (Date.now() - existing.failedAt > 6000)) {
+          delete osmTileCache[key];
+        } else {
+          return existing;
+        }
+      }
 
       const img = new Image();
-      img.crossOrigin = 'anonymous';
       img.loadedOk = false;
-      img.onload = function() { img.loadedOk = true; };
+      img.triedFallback = false;
+      img.onload = function() {
+        img.loadedOk = true;
+      };
+      img.onerror = function() {
+        if (!img.triedFallback) {
+          img.triedFallback = true;
+          img.src = 'https://a.basemaps.cartocdn.com/rastertiles/voyager/' + key + '.png';
+        } else {
+          img.failedAt = Date.now();
+        }
+      };
       img.src = 'https://tile.openstreetmap.org/' + key + '.png';
       osmTileCache[key] = img;
       return img;
@@ -179,7 +199,7 @@
       targetCtx.rect(boxX, boxY, boxW, boxH);
       targetCtx.clip();
 
-      targetCtx.fillStyle = '#0f172a';
+      targetCtx.fillStyle = '#1e293b';
       targetCtx.fillRect(boxX, boxY, boxW, boxH);
 
       const centerTileX = lonToTileX(state.lon, zoom);
@@ -197,17 +217,19 @@
           const drawY = boxY + boxH * 0.5 + (ty - centerTileY) * 256;
           if (tileImg && tileImg.loadedOk) {
             anyTileLoaded = true;
-            targetCtx.drawImage(tileImg, drawX, drawY, 256, 256);
+            try {
+              targetCtx.drawImage(tileImg, drawX, drawY, 256, 256);
+            } catch (e) {}
           }
         }
       }
 
-      // Dark contrast tint or offline tactical grid fallback
+      // Subtle contrast tint or offline tactical grid fallback
       if (anyTileLoaded) {
-        targetCtx.fillStyle = 'rgba(9, 13, 22, 0.28)';
+        targetCtx.fillStyle = 'rgba(15, 23, 42, 0.12)';
         targetCtx.fillRect(boxX, boxY, boxW, boxH);
       } else {
-        targetCtx.strokeStyle = 'rgba(148, 163, 184, 0.15)';
+        targetCtx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
         targetCtx.lineWidth = 1;
         for (let gx = boxX; gx < boxX + boxW; gx += 28) {
           targetCtx.beginPath();
@@ -223,12 +245,12 @@
         }
       }
 
-      // Draw active GPS Route Polyline
+      // Draw active GPS Route Polyline with outer casing for readability on map tiles
       if (routeWaypoints.length >= 2) {
-        targetCtx.strokeStyle = '#f97316';
-        targetCtx.lineWidth = 3.5;
         targetCtx.lineCap = 'round';
         targetCtx.lineJoin = 'round';
+        targetCtx.strokeStyle = 'rgba(9, 9, 11, 0.75)';
+        targetCtx.lineWidth = 7;
         targetCtx.beginPath();
         for (let i = 0; i < routeWaypoints.length; i++) {
           const wp = routeWaypoints[i];
@@ -237,6 +259,10 @@
           if (i === 0) targetCtx.moveTo(px, py);
           else targetCtx.lineTo(px, py);
         }
+        targetCtx.stroke();
+
+        targetCtx.strokeStyle = '#f97316';
+        targetCtx.lineWidth = 4;
         targetCtx.stroke();
       }
 
@@ -306,26 +332,45 @@
     }
 
     function drawSkyAndMountains(w, h, horizonY, curveShift) {
-      const skyGrad = ctx.createLinearGradient(0, 0, 0, horizonY);
-      skyGrad.addColorStop(0, '#090d16');
-      skyGrad.addColorStop(0.65, '#131c2e');
-      skyGrad.addColorStop(1, '#1e293b');
+      const safeHorizon = Math.max(10, horizonY);
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, safeHorizon);
+      skyGrad.addColorStop(0, '#1e3a8a');
+      skyGrad.addColorStop(0.55, '#0284c7');
+      skyGrad.addColorStop(1, '#7dd3fc');
       ctx.fillStyle = skyGrad;
-      ctx.fillRect(0, 0, w, horizonY + 2);
+      ctx.fillRect(0, 0, w, safeHorizon + 2);
 
-      ctx.fillStyle = '#182232';
+      // Far alpine range
+      ctx.fillStyle = '#334155';
       ctx.beginPath();
-      ctx.moveTo(0, horizonY);
+      ctx.moveTo(0, safeHorizon);
       const peaks = [
-        [0.0, 0.25], [0.14, 0.75], [0.28, 0.35], [0.45, 0.92],
-        [0.62, 0.40], [0.78, 0.80], [0.91, 0.45], [1.0, 0.30]
+        [0.0, 0.25], [0.14, 0.78], [0.28, 0.38], [0.45, 0.92],
+        [0.62, 0.42], [0.78, 0.84], [0.91, 0.48], [1.0, 0.30]
       ];
       for (let i = 0; i < peaks.length; i++) {
         const px = ((peaks[i][0] * w - curveShift * 28) % w + w) % w;
-        const py = horizonY - peaks[i][1] * (h * 0.22);
+        const py = safeHorizon - peaks[i][1] * (h * 0.24);
         ctx.lineTo(px, py);
       }
-      ctx.lineTo(w, horizonY);
+      ctx.lineTo(w, safeHorizon);
+      ctx.closePath();
+      ctx.fill();
+
+      // Near mountain foothills
+      ctx.fillStyle = '#475569';
+      ctx.beginPath();
+      ctx.moveTo(0, safeHorizon);
+      const foothills = [
+        [0.0, 0.14], [0.19, 0.44], [0.37, 0.22], [0.56, 0.50],
+        [0.74, 0.25], [0.89, 0.42], [1.0, 0.16]
+      ];
+      for (let i = 0; i < foothills.length; i++) {
+        const px = ((foothills[i][0] * w - curveShift * 42) % w + w) % w;
+        const py = safeHorizon - foothills[i][1] * (h * 0.18);
+        ctx.lineTo(px, py);
+      }
+      ctx.lineTo(w, safeHorizon);
       ctx.closePath();
       ctx.fill();
     }
@@ -333,12 +378,12 @@
     function drawTree(x, y, scale) {
       const trunkW = Math.max(2, 6 * scale);
       const trunkH = Math.max(4, 18 * scale);
-      ctx.fillStyle = '#3f2e21';
+      ctx.fillStyle = '#451a03';
       ctx.fillRect(x - trunkW * 0.5, y - trunkH, trunkW, trunkH);
 
       const coneW = Math.max(8, 36 * scale);
       const coneH = Math.max(16, 68 * scale);
-      ctx.fillStyle = '#14532d';
+      ctx.fillStyle = '#166534';
       ctx.beginPath();
       ctx.moveTo(x, y - trunkH - coneH);
       ctx.lineTo(x - coneW * 0.5, y - trunkH);
@@ -367,6 +412,16 @@
         ctx.textAlign = 'center';
         ctx.fillText(kmText, x, y - archH + bannerH * 0.72);
       }
+    }
+
+    function fillRoundedRect(targetCtx, x, y, w, h, r) {
+      targetCtx.beginPath();
+      if (typeof targetCtx.roundRect === 'function') {
+        targetCtx.roundRect(x, y, w, h, r);
+      } else {
+        targetCtx.rect(x, y, w, h);
+      }
+      targetCtx.fill();
     }
 
     function drawCyclistAvatar(cx, cy, scale, crankAngle, leanRad, isRider, color, label) {
@@ -416,9 +471,7 @@
 
       const bobOffset = state.watts > 250 && isRider ? Math.sin(crankAngle * 2) * 2.5 : 0;
       ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.roundRect(-14, -96 + bobOffset, 28, 34, 8);
-      ctx.fill();
+      fillRoundedRect(ctx, -14, -96 + bobOffset, 28, 34, 8);
 
       ctx.fillStyle = '#f4f4f5';
       ctx.beginPath();
@@ -438,153 +491,159 @@
     }
 
     function render(now) {
-      const dt = Math.min(0.1, (now - lastTime) / 1000);
-      lastTime = now;
+      try {
+        const dt = Math.min(0.1, Math.max(0, (now - lastTime) / 1000));
+        lastTime = now;
 
-      const localDist = state.distanceMeters;
-      state.crankAngleRad += ((state.rpm / 60) * Math.PI * 2) * dt;
+        const localDist = state.distanceMeters;
+        state.crankAngleRad += ((state.rpm / 60) * Math.PI * 2) * dt;
 
-      for (let i = 0; i < bots.length; i++) {
-        bots[i].dist = (bots[i].dist + bots[i].speedMs * dt) % 4000;
-      }
-
-      const w = canvas.width;
-      const h = canvas.height;
-
-      const gradeShift = Math.max(-45, Math.min(45, state.gradePercent * 5.5));
-      const camHorizonFactor = state.cameraMode === 'DRONE' ? 0.32 : (state.cameraMode === 'POV' ? 0.48 : 0.42);
-      const horizonY = h * camHorizonFactor - gradeShift;
-
-      const baseCurve = roadCurveAt(localDist);
-      drawSkyAndMountains(w, h, horizonY, baseCurve);
-
-      const groundGrad = ctx.createLinearGradient(0, horizonY, 0, h);
-      groundGrad.addColorStop(0, '#0f1f18');
-      groundGrad.addColorStop(1, '#09120e');
-      ctx.fillStyle = groundGrad;
-      ctx.fillRect(0, horizonY, w, h - horizonY);
-
-      const numSlices = 90;
-      const drawDistance = 140;
-      const segLength = 4;
-
-      for (let i = numSlices; i >= 1; i--) {
-        const zNear = ((i - 1) / numSlices) * drawDistance + 1.5;
-        const zFar = (i / numSlices) * drawDistance + 1.5;
-
-        const pNear = 1 / (zNear * 0.065);
-        const pFar = 1 / (zFar * 0.065);
-
-        const yNear = horizonY + (h - horizonY) * Math.min(1.2, pNear);
-        const yFar = horizonY + (h - horizonY) * Math.min(1.2, pFar);
-
-        const worldZNear = localDist + zNear;
-        const worldZFar = localDist + zFar;
-
-        const curveNear = (roadCurveAt(worldZNear) - baseCurve) * (1 - pNear) * (w * 0.22);
-        const curveFar = (roadCurveAt(worldZFar) - baseCurve) * (1 - pFar) * (w * 0.22);
-
-        const xNear = w * 0.5 + curveNear;
-        const xFar = w * 0.5 + curveFar;
-
-        const wNear = (w * 0.44) * pNear;
-        const wFar = (w * 0.44) * pFar;
-
-        const stripeIndex = Math.floor(worldZNear / segLength);
-        const isAlt = (stripeIndex % 2) === 0;
-
-        ctx.fillStyle = isAlt ? '#f97316' : '#e4e4e7';
-        ctx.beginPath();
-        ctx.moveTo(xFar - wFar * 1.07, yFar);
-        ctx.lineTo(xFar + wFar * 1.07, yFar);
-        ctx.lineTo(xNear + wNear * 1.07, yNear);
-        ctx.lineTo(xNear - wNear * 1.07, yNear);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.fillStyle = isAlt ? '#27272a' : '#1f1f23';
-        ctx.beginPath();
-        ctx.moveTo(xFar - wFar, yFar);
-        ctx.lineTo(xFar + wFar, yFar);
-        ctx.lineTo(xNear + wNear, yNear);
-        ctx.lineTo(xNear - wNear, yNear);
-        ctx.closePath();
-        ctx.fill();
-
-        if (isAlt) {
-          ctx.fillStyle = '#facc15';
-          ctx.beginPath();
-          ctx.moveTo(xFar - wFar * 0.025, yFar);
-          ctx.lineTo(xFar + wFar * 0.025, yFar);
-          ctx.lineTo(xNear + wNear * 0.025, yNear);
-          ctx.lineTo(xNear - wNear * 0.025, yNear);
-          ctx.closePath();
-          ctx.fill();
+        for (let i = 0; i < bots.length; i++) {
+          bots[i].dist = (bots[i].dist + bots[i].speedMs * dt) % 4000;
         }
 
-        if (stripeIndex % 4 === 0 && Math.floor(worldZFar / segLength) !== stripeIndex) {
-          const treeScale = Math.min(1.1, pNear * 0.9);
-          drawTree(xNear - wNear * 1.45, yNear, treeScale);
-          drawTree(xNear + wNear * 1.45, yNear, treeScale);
-        }
+        const w = canvas.width;
+        const h = canvas.height;
 
-        const bannerIdx = Math.floor(worldZNear / 500);
-        if (bannerIdx > 0 && Math.floor(worldZFar / 500) !== bannerIdx) {
-          const kmLabel = (bannerIdx * 0.5).toFixed(1) + ' KM';
-          drawArchBanner(xNear, yNear, wNear, Math.min(1.0, pNear), kmLabel);
-        }
+        if (state.cameraMode === 'MAP') {
+          renderGpsMap(ctx, 0, 0, w, h, 14);
+        } else {
+          const gradeShift = Math.max(-45, Math.min(45, state.gradePercent * 5.5));
+          const camHorizonFactor = state.cameraMode === 'DRONE' ? 0.32 : (state.cameraMode === 'POV' ? 0.48 : 0.42);
+          const horizonY = Math.max(20, Math.min(h - 20, h * camHorizonFactor - gradeShift));
 
-        for (let b = 0; b < bots.length; b++) {
-          const bot = bots[b];
-          const riderLoop = ((localDist % 4000) + 4000) % 4000;
-          let relZ = bot.dist - riderLoop;
-          if (relZ < 0) relZ += 4000;
-          if (relZ >= zNear && relZ < zFar && relZ < drawDistance) {
-            const botX = xNear + wNear * bot.laneOffset;
-            const botScale = Math.min(0.95, pNear * 0.85);
+          const baseCurve = roadCurveAt(localDist);
+          drawSkyAndMountains(w, h, horizonY, baseCurve);
+
+          const groundGrad = ctx.createLinearGradient(0, horizonY, 0, h);
+          groundGrad.addColorStop(0, '#15803d');
+          groundGrad.addColorStop(1, '#14532d');
+          ctx.fillStyle = groundGrad;
+          ctx.fillRect(0, horizonY, w, h - horizonY);
+
+          const numSlices = 90;
+          const drawDistance = 140;
+          const segLength = 4;
+
+          for (let i = numSlices; i >= 1; i--) {
+            const zNear = ((i - 1) / numSlices) * drawDistance + 1.5;
+            const zFar = (i / numSlices) * drawDistance + 1.5;
+
+            const pNear = 1 / (zNear * 0.065);
+            const pFar = 1 / (zFar * 0.065);
+
+            const yNear = horizonY + (h - horizonY) * Math.min(1.2, pNear);
+            const yFar = horizonY + (h - horizonY) * Math.min(1.2, pFar);
+
+            const worldZNear = localDist + zNear;
+            const worldZFar = localDist + zFar;
+
+            const curveNear = (roadCurveAt(worldZNear) - baseCurve) * (1 - pNear) * (w * 0.22);
+            const curveFar = (roadCurveAt(worldZFar) - baseCurve) * (1 - pFar) * (w * 0.22);
+
+            const xNear = w * 0.5 + curveNear;
+            const xFar = w * 0.5 + curveFar;
+
+            const wNear = (w * 0.44) * pNear;
+            const wFar = (w * 0.44) * pFar;
+
+            const stripeIndex = Math.floor(worldZNear / segLength);
+            const isAlt = (stripeIndex % 2) === 0;
+
+            ctx.fillStyle = isAlt ? '#f97316' : '#f8fafc';
+            ctx.beginPath();
+            ctx.moveTo(xFar - wFar * 1.07, yFar);
+            ctx.lineTo(xFar + wFar * 1.07, yFar);
+            ctx.lineTo(xNear + wNear * 1.07, yNear);
+            ctx.lineTo(xNear - wNear * 1.07, yNear);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = isAlt ? '#334155' : '#475569';
+            ctx.beginPath();
+            ctx.moveTo(xFar - wFar, yFar);
+            ctx.lineTo(xFar + wFar, yFar);
+            ctx.lineTo(xNear + wNear, yNear);
+            ctx.lineTo(xNear - wNear, yNear);
+            ctx.closePath();
+            ctx.fill();
+
+            if (isAlt) {
+              ctx.fillStyle = '#facc15';
+              ctx.beginPath();
+              ctx.moveTo(xFar - wFar * 0.025, yFar);
+              ctx.lineTo(xFar + wFar * 0.025, yFar);
+              ctx.lineTo(xNear + wNear * 0.025, yNear);
+              ctx.lineTo(xNear - wNear * 0.025, yNear);
+              ctx.closePath();
+              ctx.fill();
+            }
+
+            if (stripeIndex % 4 === 0 && Math.floor(worldZFar / segLength) !== stripeIndex) {
+              const treeScale = Math.min(1.1, pNear * 0.9);
+              drawTree(xNear - wNear * 1.45, yNear, treeScale);
+              drawTree(xNear + wNear * 1.45, yNear, treeScale);
+            }
+
+            const bannerIdx = Math.floor(worldZNear / 500);
+            if (bannerIdx > 0 && Math.floor(worldZFar / 500) !== bannerIdx) {
+              const kmLabel = (bannerIdx * 0.5).toFixed(1) + ' KM';
+              drawArchBanner(xNear, yNear, wNear, Math.min(1.0, pNear), kmLabel);
+            }
+
+            for (let b = 0; b < bots.length; b++) {
+              const bot = bots[b];
+              const riderLoop = ((localDist % 4000) + 4000) % 4000;
+              let relZ = bot.dist - riderLoop;
+              if (relZ < 0) relZ += 4000;
+              if (relZ >= zNear && relZ < zFar && relZ < drawDistance) {
+                const botX = xNear + wNear * bot.laneOffset;
+                const botScale = Math.min(0.95, pNear * 0.85);
+                drawCyclistAvatar(
+                  botX,
+                  yNear,
+                  botScale,
+                  now * 0.009 + b,
+                  0,
+                  false,
+                  bot.color,
+                  bot.name
+                );
+              }
+            }
+          }
+
+          if (state.cameraMode !== 'POV') {
+            const avatarScale = state.cameraMode === 'DRONE' ? 0.68 : 0.95;
+            const avatarY = state.cameraMode === 'DRONE' ? h * 0.80 : h * 0.86;
             drawCyclistAvatar(
-              botX,
-              yNear,
-              botScale,
-              now * 0.009 + b,
-              0,
-              false,
-              bot.color,
-              bot.name
+              w * 0.5,
+              avatarY,
+              avatarScale,
+              state.crankAngleRad,
+              baseCurve * 0.35,
+              true,
+              '#f97316',
+              null
             );
+          } else {
+            ctx.strokeStyle = '#3f3f46';
+            ctx.lineWidth = 10;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(w * 0.36, h * 0.96);
+            ctx.quadraticCurveTo(w * 0.5, h * 0.88, w * 0.64, h * 0.96);
+            ctx.stroke();
           }
         }
-      }
 
-      if (state.cameraMode !== 'POV') {
-        const avatarScale = state.cameraMode === 'DRONE' ? 0.68 : 0.95;
-        const avatarY = state.cameraMode === 'DRONE' ? h * 0.80 : h * 0.86;
-        drawCyclistAvatar(
-          w * 0.5,
-          avatarY,
-          avatarScale,
-          state.crankAngleRad,
-          baseCurve * 0.35,
-          true,
-          '#f97316',
-          null
-        );
-      } else {
-        ctx.strokeStyle = '#3f3f46';
-        ctx.lineWidth = 10;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(w * 0.36, h * 0.96);
-        ctx.quadraticCurveTo(w * 0.5, h * 0.88, w * 0.64, h * 0.96);
-        ctx.stroke();
+        // Render Full-Screen Interactive Online Map when modal is open
+        if (state.isMapModalOpen) {
+          renderGpsMap(fullMapCtx, 0, 0, fullMapCanvas.width, fullMapCanvas.height, 13);
+        }
+      } finally {
+        requestAnimationFrame(render);
       }
-
-      // Render Full-Screen Interactive Online Map when modal is open
-      if (state.isMapModalOpen) {
-        renderGpsMap(fullMapCtx, 0, 0, fullMapCanvas.width, fullMapCanvas.height, 13);
-      }
-
-      requestAnimationFrame(render);
     }
 
     requestAnimationFrame(render);
