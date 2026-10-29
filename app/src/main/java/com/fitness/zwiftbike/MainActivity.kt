@@ -841,6 +841,8 @@ fun VeloPulseCockpitScreen(
                                 )
                             }
 
+                            val isPhoneUpToDate = state.installedVersionName.removePrefix("v")
+                                .equals(state.latestReleaseTag.removePrefix("v"), ignoreCase = true)
                             Button(
                                 onClick = onDownloadPhoneUpdate,
                                 modifier = Modifier
@@ -848,12 +850,12 @@ fun VeloPulseCockpitScreen(
                                     .heightIn(min = 48.dp),
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = AccentOrange,
-                                    contentColor = TextPrimaryWhite
+                                    containerColor = if (isPhoneUpToDate) BgControlDark else AccentOrange,
+                                    contentColor = if (isPhoneUpToDate) SignalEmerald else TextPrimaryWhite
                                 )
                             ) {
                                 Text(
-                                    text = "Update Phone APK",
+                                    text = if (isPhoneUpToDate) "Up to Date (${state.installedVersionName})" else "Update Phone APK",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )

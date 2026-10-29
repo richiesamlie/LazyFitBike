@@ -21,7 +21,7 @@ class WearOtaListenerService : WearableListenerService() {
         when (event.path) {
             "/velopulse/ping" -> {
                 Wearable.getMessageClient(this)
-                    .sendMessage(event.sourceNodeId, "/velopulse/pong", "v1.2.2".toByteArray(Charsets.UTF_8))
+                    .sendMessage(event.sourceNodeId, "/velopulse/pong", "v1.3.0".toByteArray(Charsets.UTF_8))
             }
             "/velopulse/control" -> {
                 val cmd = String(event.data, Charsets.UTF_8).trim().uppercase()

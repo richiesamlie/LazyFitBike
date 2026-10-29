@@ -2,7 +2,6 @@ name: Build & Publish LazyFitBike APKs
 
 on:
   push:
-    branches: [ "main" ]
     tags: [ "v*" ]
   workflow_dispatch:
 
@@ -23,19 +22,24 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Build Phone and Galaxy Watch 4 APKs
+      - name: Build Minified Release Phone and Galaxy Watch 4 APKs
         run: |
           chmod +x gradlew
-          ./gradlew :app:testDebugUnitTest :wear:testDebugUnitTest :app:assembleDebug :wear:assembleDebug
-          cp app/build/outputs/apk/debug/app-debug.apk LazyFitBike-phone.apk
-          cp wear/build/outputs/apk/debug/wear-debug.apk LazyFitBike-watch.apk
+          ./gradlew :app:testDebugUnitTest :wear:testDebugUnitTest :app:assembleRelease :wear:assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk LazyFitBike-phone.apk
+          cp wear/build/outputs/apk/release/wear-release.apk LazyFitBike-watch.apk
 
-      - name: Publish APKs to Latest GitHub Release
+      - name: Publish APKs to Matching Version GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v1.2.${{ github.run_number }}"
-          gh release create "$TAG" LazyFitBike-phone.apk LazyFitBike-watch.apk \
-            --title "LazyFitBike $TAG (Phone + Galaxy Watch 4)" \
-            --notes "Automated OTA build from commit ${{ github.sha }} signed with shared project keystore." \
-            --latest
+          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          TAG="v${VERSION_NAME}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" LazyFitBike-phone.apk LazyFitBike-watch.apk --clobber
+          else
+            gh release create "$TAG" LazyFitBike-phone.apk LazyFitBike-watch.apk \
+              --title "LazyFitBike $TAG (Phone + Galaxy Watch 4)" \
+              --notes "R8-minified OTA build ($TAG) signed with shared project keystore." \
+              --latest
+          fi

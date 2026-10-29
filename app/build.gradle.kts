@@ -11,8 +11,8 @@ android {
         applicationId = "com.fitness.zwiftbike"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.2.2"
+        versionCode = 10
+        versionName = "1.3.0"
     }
 
     signingConfigs {
@@ -29,7 +29,8 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -49,6 +50,11 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+
+    lint {
+        disable += "InvalidFragmentVersionForActivityResult"
+        checkReleaseBuilds = false
     }
 }
 

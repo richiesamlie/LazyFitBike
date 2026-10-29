@@ -63,7 +63,7 @@ data class RideUiState(
     val isMapModalOpen: Boolean = false,
     val isStravaModalOpen: Boolean = false,
     val isUpdateModalOpen: Boolean = false,
-    val installedVersionName: String = "v1.2.1",
+    val installedVersionName: String = "v1.3.0",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
@@ -137,9 +137,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     private fun resolveInstalledVersion(app: Application): String {
         return runCatching {
             val info = app.packageManager.getPackageInfo(app.packageName, 0)
-            val vName = info.versionName ?: "1.2.1"
+            val vName = info.versionName ?: "1.3.0"
             if (vName.startsWith("v")) vName else "v$vName"
-        }.getOrDefault("v1.2.1")
+        }.getOrDefault("v1.3.0")
     }
 
     init {
@@ -388,14 +388,20 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val info = GithubUpdater.fetchLatestRelease()
             if (info != null) {
-                val hasPhone = info.phoneApkUrl != null
-                val hasWatch = info.watchApkUrl != null
+                val installedClean = _uiState.value.installedVersionName.trim().removePrefix("v")
+                val latestClean = info.tagName.trim().removePrefix("v")
+                val isSameVersion = installedClean.equals(latestClean, ignoreCase = true)
+                val statusMsg = if (isSameVersion) {
+                    "Up to date! Installed ${_uiState.value.installedVersionName} matches GitHub latest (${info.tagName})."
+                } else {
+                    "Update available: ${info.tagName} (Installed: ${_uiState.value.installedVersionName})"
+                }
                 _uiState.value = _uiState.value.copy(
                     latestReleaseTag = info.tagName,
                     latestReleaseName = info.releaseName,
                     latestPhoneApkUrl = info.phoneApkUrl,
                     latestWatchApkUrl = info.watchApkUrl,
-                    updateStatusMessage = "Found ${info.tagName} (Phone APK: $hasPhone, Watch APK: $hasWatch)"
+                    updateStatusMessage = statusMsg
                 )
             } else {
                 _uiState.value = _uiState.value.copy(
