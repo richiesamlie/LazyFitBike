@@ -35,6 +35,7 @@ data class WatchWorkoutState(
     val isSimulated: Boolean = false,
     val rpm: Float = 0f,
     val bpm: Int = 0,
+    val maxHr: Int = 190,
     val hrStatus: String = "IDLE", // "IDLE", "NO PERM", "MEASURING", "OFF WRIST", or "LOCKED"
     val connectedNodes: Int = 0
 )
@@ -66,9 +67,11 @@ class SensorWorkoutService : Service(), SensorEventListener {
         const val ACTION_STOP = "com.fitness.zwiftbike.wear.ACTION_STOP"
         const val ACTION_TOGGLE_MODE = "com.fitness.zwiftbike.wear.ACTION_TOGGLE_MODE"
         const val ACTION_SET_MODE = "com.fitness.zwiftbike.wear.ACTION_SET_MODE"
+        const val ACTION_SET_MAX_HR = "com.fitness.zwiftbike.wear.ACTION_SET_MAX_HR"
         const val ACTION_TOGGLE_SIM = "com.fitness.zwiftbike.wear.ACTION_TOGGLE_SIM"
         const val ACTION_REFRESH_SENSORS = "com.fitness.zwiftbike.wear.ACTION_REFRESH_SENSORS"
         const val EXTRA_MODE = "extra_mode"
+        const val EXTRA_MAX_HR = "extra_max_hr"
 
         private val _state = MutableStateFlow(WatchWorkoutState())
         val state: StateFlow<WatchWorkoutState> = _state.asStateFlow()
@@ -76,6 +79,10 @@ class SensorWorkoutService : Service(), SensorEventListener {
 
     override fun onCreate() {
         super.onCreate()
+        val prefs = getSharedPreferences("velopulse_watch_prefs", Context.MODE_PRIVATE)
+        val savedMaxHr = prefs.getInt("maxHr", 190).coerceIn(130, 230)
+        _state.value = _state.value.copy(maxHr = savedMaxHr)
+
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         telemetrySender = TelemetrySender(this)
         hrTrackerManager = HeartRateTrackerManager(
@@ -116,6 +123,14 @@ class SensorWorkoutService : Service(), SensorEventListener {
                 if (targetMode == "ANKLE" || targetMode == "WRIST") {
                     applyModeChange(targetMode)
                 }
+            }
+            ACTION_SET_MAX_HR -> {
+                val nextMaxHr = (intent.getIntExtra(EXTRA_MAX_HR, 190)).coerceIn(130, 230)
+                getSharedPreferences("velopulse_watch_prefs", Context.MODE_PRIVATE)
+                    .edit()
+                    .putInt("maxHr", nextMaxHr)
+                    .apply()
+                _state.value = _state.value.copy(maxHr = nextMaxHr)
             }
             ACTION_TOGGLE_SIM -> {
                 val nextSim = !_state.value.isSimulated

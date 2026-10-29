@@ -111,4 +111,64 @@ class CyclingPhysicsTest {
         val (motionWatts, _) = physics.computePowerWatts(mode = "WRIST", rpm = 80f, bpm = 60, gear = 7)
         assertTrue("Expected hybrid motion watts > 50W, got $motionWatts", motionWatts > 50f)
     }
+
+    @Test
+    fun updateProfileUpdatesRiderMassAndCalculations() {
+        val physics = CyclingPhysics()
+        physics.updateProfile(
+            riderWeightKg = 80f,
+            bikeWeightKg = 10f,
+            ftpWatts = 250f,
+            restingHr = 55f,
+            maxHr = 185f
+        )
+        assertEquals(80f, physics.riderWeightKg, 0.01f)
+        assertEquals(10f, physics.bikeWeightKg, 0.01f)
+        assertEquals(250f, physics.ftpWatts, 0.01f)
+        assertEquals(55f, physics.restingHr, 0.01f)
+        assertEquals(185f, physics.maxHr, 0.01f)
+
+        val res = physics.step(
+            dtSeconds = 0.5f,
+            mode = "ANKLE",
+            rpm = 90f,
+            bpm = 150,
+            gear = 8,
+            overrideGradePercent = 0f
+        )
+        assertEquals(res.watts / 80f, res.wattsPerKg, 0.02f)
+    }
+
+    @Test
+    fun physiological5ZoneCalculationsMatchThresholds() {
+        val ftp = 200f
+        assertEquals(1, CyclingPhysics.computePowerZone(100, ftp)) // 50% < 55% -> Z1
+        assertEquals(2, CyclingPhysics.computePowerZone(140, ftp)) // 70% <= 75% -> Z2
+        assertEquals(3, CyclingPhysics.computePowerZone(160, ftp)) // 80% <= 90% -> Z3
+        assertEquals(4, CyclingPhysics.computePowerZone(200, ftp)) // 100% <= 105% -> Z4
+        assertEquals(5, CyclingPhysics.computePowerZone(220, ftp)) // 110% > 105% -> Z5
+
+        val maxHr = 200f
+        assertEquals(1, CyclingPhysics.computeHrZone(100, maxHr)) // 50% < 60% -> Z1
+        assertEquals(2, CyclingPhysics.computeHrZone(130, maxHr)) // 65% <= 70% -> Z2
+        assertEquals(3, CyclingPhysics.computeHrZone(150, maxHr)) // 75% <= 80% -> Z3
+        assertEquals(4, CyclingPhysics.computeHrZone(170, maxHr)) // 85% <= 90% -> Z4
+        assertEquals(5, CyclingPhysics.computeHrZone(190, maxHr)) // 95% > 90% -> Z5
+
+        assertEquals("Z1 REC", CyclingPhysics.zoneShortName(1))
+        assertEquals("Z5 MAX", CyclingPhysics.zoneShortName(5))
+    }
+
+    @Test
+    fun autoCalculatorFormulasWorkAccurately() {
+        // Tanaka formula: 208 - (0.7 * 30) = 208 - 21 = 187
+        assertEquals(187, CyclingPhysics.estimateMaxHrFromAge(30))
+        // 208 - (0.7 * 40) = 208 - 28 = 180
+        assertEquals(180, CyclingPhysics.estimateMaxHrFromAge(40))
+
+        // FTP: 75kg
+        assertEquals(150, CyclingPhysics.estimateFtpFromWeightAndLevel(75f, "BEGINNER")) // 75 * 2.0 = 150
+        assertEquals(210, CyclingPhysics.estimateFtpFromWeightAndLevel(75f, "INTERMEDIATE")) // 75 * 2.8 = 210
+        assertEquals(270, CyclingPhysics.estimateFtpFromWeightAndLevel(75f, "ADVANCED")) // 75 * 3.6 = 270
+    }
 }

@@ -126,6 +126,8 @@ class MainActivity : ComponentActivity() {
                 onSetMapModalOpen = rideViewModel::setMapModalOpen,
                 onSetStravaModalOpen = rideViewModel::setStravaModalOpen,
                 onSetUpdateModalOpen = rideViewModel::setUpdateModalOpen,
+                onSetProfileModalOpen = rideViewModel::setProfileModalOpen,
+                onSaveRiderProfile = rideViewModel::saveRiderProfile,
                 onCheckGithubUpdates = rideViewModel::checkGithubUpdates,
                 onDownloadPhoneUpdate = { rideViewModel.downloadAndInstallPhoneUpdate(context) },
                 onRelayWatchUpdate = { rideViewModel.downloadAndRelayWatchUpdate(context) },
@@ -232,6 +234,39 @@ private val SignalRose = Color(0xFFFB7185)
 private val SignalEmerald = Color(0xFF34D399)
 private val SignalAmber = Color(0xFFFBBF24)
 
+private val Zone1Gray = Color(0xFF94A3B8)
+private val Zone2Blue = Color(0xFF38BDF8)
+private val Zone3Green = Color(0xFF34D399)
+private val Zone4Amber = Color(0xFFFBBF24)
+private val Zone5Red = Color(0xFFF43F5E)
+
+private fun zoneColor(zone: Int): Color = when (zone) {
+    1 -> Zone1Gray
+    2 -> Zone2Blue
+    3 -> Zone3Green
+    4 -> Zone4Amber
+    else -> Zone5Red
+}
+
+@Composable
+private fun MiniZoneBar(activeZone: Int, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier.height(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        for (z in 1..5) {
+            val c = zoneColor(z)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(if (z <= activeZone) c else c.copy(alpha = 0.22f))
+            )
+        }
+    }
+}
+
 private val TabularStyle = TextStyle(fontFeatureSettings = "tnum")
 
 private fun pushRoutePolylineToWebView(view: WebView?, polylineJson: String) {
@@ -275,6 +310,8 @@ fun VeloPulseCockpitScreen(
     onSetMapModalOpen: (Boolean) -> Unit,
     onSetStravaModalOpen: (Boolean) -> Unit,
     onSetUpdateModalOpen: (Boolean) -> Unit,
+    onSetProfileModalOpen: (Boolean) -> Unit,
+    onSaveRiderProfile: (Float, Float, Int, Int, Int, Int) -> Unit,
     onCheckGithubUpdates: () -> Unit,
     onDownloadPhoneUpdate: () -> Unit,
     onRelayWatchUpdate: () -> Unit,
@@ -361,25 +398,42 @@ fun VeloPulseCockpitScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.Top
                 ) {
-                    // ZONE A: Primary Effort Pod
-                    HudPod(modifier = Modifier.weight(1f)) {
+                    // ZONE A: Primary Effort Pod (Glowing 5-Zone Color-Coded)
+                    val activePodZone = if (state.sensorMode == "WRIST") state.hrZone else state.powerZone
+                    val pZoneColor = zoneColor(state.powerZone)
+                    val hrZoneColor = zoneColor(state.hrZone)
+                    HudPod(
+                        modifier = Modifier.weight(1f),
+                        borderColor = if (state.watts > 0 || state.bpm > 0) zoneColor(activePodZone) else BorderZinc
+                    ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.Bottom
                         ) {
-                            Column {
-                                Text(
-                                    text = "POWER (EST)",
-                                    color = TextMutedZinc,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "POWER",
+                                        color = TextMutedZinc,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = CyclingPhysics.zoneShortName(state.powerZone),
+                                        color = pZoneColor,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
                                 Row(verticalAlignment = Alignment.Bottom) {
                                     Text(
                                         text = state.watts.toString(),
                                         style = TabularStyle,
-                                        color = AccentOrange,
+                                        color = pZoneColor,
                                         fontSize = 26.sp,
                                         fontWeight = FontWeight.Black
                                     )
@@ -391,6 +445,11 @@ fun VeloPulseCockpitScreen(
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
+                                Spacer(modifier = Modifier.height(3.dp))
+                                MiniZoneBar(
+                                    activeZone = state.powerZone,
+                                    modifier = Modifier.fillMaxWidth(0.85f)
+                                )
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
@@ -406,6 +465,13 @@ fun VeloPulseCockpitScreen(
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold
                                 )
+                                Text(
+                                    text = "FTP ${state.ftpWatts}W",
+                                    style = TabularStyle,
+                                    color = TextMutedZinc,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
                         }
 
@@ -416,7 +482,8 @@ fun VeloPulseCockpitScreen(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Bottom
                         ) {
                             Column {
                                 Text(
@@ -433,20 +500,39 @@ fun VeloPulseCockpitScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                             }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    text = "HEART RATE",
-                                    color = TextMutedZinc,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                            Column(
+                                horizontalAlignment = Alignment.End,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = CyclingPhysics.zoneShortName(state.hrZone),
+                                        color = hrZoneColor,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                    Text(
+                                        text = "HEART RATE",
+                                        color = TextMutedZinc,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                                 val bpmText = if (state.bpm > 0) "${state.bpm} BPM" else "READY"
                                 Text(
                                     text = bpmText,
                                     style = TabularStyle,
-                                    color = SignalRose,
+                                    color = if (state.bpm > 0) hrZoneColor else SignalRose,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                MiniZoneBar(
+                                    activeZone = if (state.bpm > 0) state.hrZone else 1,
+                                    modifier = Modifier.fillMaxWidth(0.75f)
                                 )
                             }
                         }
@@ -1027,6 +1113,226 @@ fun VeloPulseCockpitScreen(
                 }
             }
 
+            // RIDER PROFILE & 5-ZONE CALIBRATION MODAL
+            if (state.isProfileModalOpen) {
+                var weightInput by remember(state.riderWeightKg) {
+                    mutableStateOf(state.riderWeightKg.toInt().toString())
+                }
+                var bikeWeightInput by remember(state.bikeWeightKg) {
+                    mutableStateOf(state.bikeWeightKg.toInt().toString())
+                }
+                var ftpInput by remember(state.ftpWatts) {
+                    mutableStateOf(state.ftpWatts.toString())
+                }
+                var restHrInput by remember(state.restingHr) {
+                    mutableStateOf(state.restingHr.toString())
+                }
+                var maxHrInput by remember(state.maxHr) {
+                    mutableStateOf(state.maxHr.toString())
+                }
+                var ageInput by remember(state.riderAge) {
+                    mutableStateOf(state.riderAge.toString())
+                }
+
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    HudPod(
+                        modifier = Modifier
+                            .fillMaxWidth(0.92f)
+                            .verticalScroll(rememberScrollState()),
+                        borderColor = AccentOrange
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "RIDER PROFILE & 5-ZONE CALIBRATION",
+                                color = AccentOrange,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                            Button(
+                                onClick = { onSetProfileModalOpen(false) },
+                                modifier = Modifier.heightIn(min = 36.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = TextPrimaryWhite
+                                )
+                            ) {
+                                Text("Close", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = weightInput,
+                                onValueChange = { weightInput = it.filter { ch -> ch.isDigit() || ch == '.' } },
+                                label = { Text("Rider Weight (kg)", fontSize = 10.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = bikeWeightInput,
+                                onValueChange = { bikeWeightInput = it.filter { ch -> ch.isDigit() || ch == '.' } },
+                                label = { Text("Bike Weight (kg)", fontSize = 10.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = ageInput,
+                                onValueChange = { ageInput = it.filter { ch -> ch.isDigit() } },
+                                label = { Text("Age (yrs)", fontSize = 10.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = ftpInput,
+                                onValueChange = { ftpInput = it.filter { ch -> ch.isDigit() } },
+                                label = { Text("FTP Power (Watts)", fontSize = 10.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = restHrInput,
+                                onValueChange = { restHrInput = it.filter { ch -> ch.isDigit() } },
+                                label = { Text("Resting HR (BPM)", fontSize = 10.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = maxHrInput,
+                                onValueChange = { maxHrInput = it.filter { ch -> ch.isDigit() } },
+                                label = { Text("Max HR (BPM)", fontSize = 10.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = "1-TAP AUTO-CALCULATORS (AGE & FITNESS LEVEL)",
+                            color = TextMutedZinc,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    val ageVal = ageInput.toIntOrNull() ?: 30
+                                    maxHrInput = CyclingPhysics.estimateMaxHrFromAge(ageVal).toString()
+                                },
+                                modifier = Modifier.heightIn(min = 38.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = Zone2Blue
+                                )
+                            ) {
+                                Text("Calc Max HR from Age", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = {
+                                    val wVal = weightInput.toFloatOrNull() ?: 70f
+                                    ftpInput = CyclingPhysics.estimateFtpFromWeightAndLevel(wVal, "BEGINNER").toString()
+                                },
+                                modifier = Modifier.heightIn(min = 38.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = Zone3Green
+                                )
+                            ) {
+                                Text("Beginner FTP (2.0 W/kg)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = {
+                                    val wVal = weightInput.toFloatOrNull() ?: 70f
+                                    ftpInput = CyclingPhysics.estimateFtpFromWeightAndLevel(wVal, "INTERMEDIATE").toString()
+                                },
+                                modifier = Modifier.heightIn(min = 38.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = Zone4Amber
+                                )
+                            ) {
+                                Text("Moderate FTP (2.8 W/kg)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = {
+                                    val wVal = weightInput.toFloatOrNull() ?: 70f
+                                    ftpInput = CyclingPhysics.estimateFtpFromWeightAndLevel(wVal, "ADVANCED").toString()
+                                },
+                                modifier = Modifier.heightIn(min = 38.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = Zone5Red
+                                )
+                            ) {
+                                Text("Pro FTP (3.6 W/kg)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Button(
+                            onClick = {
+                                onSaveRiderProfile(
+                                    weightInput.toFloatOrNull() ?: state.riderWeightKg,
+                                    bikeWeightInput.toFloatOrNull() ?: state.bikeWeightKg,
+                                    ftpInput.toIntOrNull() ?: state.ftpWatts,
+                                    restHrInput.toIntOrNull() ?: state.restingHr,
+                                    maxHrInput.toIntOrNull() ?: state.maxHr,
+                                    ageInput.toIntOrNull() ?: state.riderAge
+                                )
+                                onSetProfileModalOpen(false)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 46.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AccentOrange,
+                                contentColor = TextPrimaryWhite
+                            )
+                        ) {
+                            Text(
+                                text = "Save Profile & Sync Zones to Galaxy Watch",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+                }
+            }
+
             // BOTTOM PERIMETER ROW
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1050,6 +1356,22 @@ fun VeloPulseCockpitScreen(
                         ) {
                             Text(
                                 text = "Mode: ${state.sensorMode}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Button(
+                            onClick = { onSetProfileModalOpen(!state.isProfileModalOpen) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (state.isProfileModalOpen) AccentOrange else BgControlDark,
+                                contentColor = TextPrimaryWhite
+                            )
+                        ) {
+                            Text(
+                                text = "Profile",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -1384,13 +1706,14 @@ private fun MiniGpsRouteCanvas(
 @Composable
 private fun HudPod(
     modifier: Modifier = Modifier,
+    borderColor: Color = BorderZinc,
     content: @Composable () -> Unit
 ) {
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(BgCarbonHud)
-            .border(1.dp, BorderZinc, RoundedCornerShape(12.dp))
+            .border(1.5.dp, borderColor, RoundedCornerShape(12.dp))
             .padding(9.dp)
     ) {
         content()

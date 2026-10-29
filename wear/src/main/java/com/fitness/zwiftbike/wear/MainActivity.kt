@@ -191,6 +191,40 @@ private val SignalRose = Color(0xFFFB7185)
 private val SignalEmerald = Color(0xFF34D399)
 private val SignalAmber = Color(0xFFFBBF24)
 
+private val Zone1Gray = Color(0xFF94A3B8)
+private val Zone2Blue = Color(0xFF38BDF8)
+private val Zone3Green = Color(0xFF34D399)
+private val Zone4Amber = Color(0xFFFBBF24)
+private val Zone5Red = Color(0xFFF43F5E)
+
+private fun watchHrZone(bpm: Int, maxHr: Int): Int {
+    if (bpm <= 0) return 1
+    val pct = bpm.toFloat() / maxHr.coerceAtLeast(120).toFloat()
+    return when {
+        pct < 0.60f -> 1
+        pct <= 0.70f -> 2
+        pct <= 0.80f -> 3
+        pct <= 0.90f -> 4
+        else -> 5
+    }
+}
+
+private fun watchRpmZone(rpm: Float): Int = when {
+    rpm < 55f -> 1
+    rpm < 75f -> 2
+    rpm < 90f -> 3
+    rpm < 105f -> 4
+    else -> 5
+}
+
+private fun watchZoneColor(zone: Int): Color = when (zone) {
+    1 -> Zone1Gray
+    2 -> Zone2Blue
+    3 -> Zone3Green
+    4 -> Zone4Amber
+    else -> Zone5Red
+}
+
 private val TabularStyle = TextStyle(fontFeatureSettings = "tnum")
 
 @Composable
@@ -252,6 +286,14 @@ fun WatchSensorScreen(
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                val activeHrZone = watchHrZone(state.bpm, state.maxHr)
+                val activeRpmZone = watchRpmZone(state.rpm)
+                val primaryColor = if (state.mode == "ANKLE") {
+                    if (state.rpm >= 5f) watchZoneColor(activeRpmZone) else TextWhite
+                } else {
+                    if (state.bpm > 0) watchZoneColor(activeHrZone) else TextWhite
+                }
+
                 val primaryValue = if (state.mode == "ANKLE") {
                     state.rpm.roundToInt().toString()
                 } else {
@@ -263,10 +305,10 @@ fun WatchSensorScreen(
                     }
                 }
                 val primaryUnit = if (state.mode == "ANKLE") {
-                    "RPM CADENCE"
+                    if (state.rpm >= 5f) "RPM · Z$activeRpmZone" else "RPM CADENCE"
                 } else {
                     when {
-                        state.bpm > 0 -> "HEART RATE (BPM)"
+                        state.bpm > 0 -> "BPM · ZONE $activeHrZone"
                         state.hrStatus == "NO PERM" -> "TAP HR PILL TO ALLOW"
                         state.hrStatus == "OFF WRIST" -> "WEAR WATCH SNUGLY"
                         state.isActive -> "MEASURING PULSE..."
@@ -277,14 +319,14 @@ fun WatchSensorScreen(
                 Text(
                     text = primaryValue,
                     style = TabularStyle,
-                    color = TextWhite,
+                    color = primaryColor,
                     fontSize = 42.sp,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center
                 )
                 Text(
                     text = primaryUnit,
-                    color = TextMutedZinc,
+                    color = if (state.bpm > 0 || state.rpm >= 5f) primaryColor else TextMutedZinc,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -295,29 +337,30 @@ fun WatchSensorScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val hrPillColor = if (state.bpm > 0) watchZoneColor(activeHrZone) else SignalRose
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .background(SurfaceZinc)
-                            .border(1.dp, BorderZinc, RoundedCornerShape(8.dp))
+                            .border(1.dp, if (state.bpm > 0) hrPillColor else BorderZinc, RoundedCornerShape(8.dp))
                             .clickable { onRequestPermissions() }
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         val secondaryLabel = if (state.mode == "ANKLE") {
                             val hrDisplay = when {
-                                state.bpm > 0 -> "${state.bpm} BPM"
+                                state.bpm > 0 -> "${state.bpm} Z$activeHrZone"
                                 state.hrStatus == "NO PERM" -> "ALLOW"
                                 state.isActive -> "WAIT.."
                                 else -> "0 BPM"
                             }
                             "HR: $hrDisplay"
                         } else {
-                            if (state.bpm > 0) "PPG LOCKED" else state.hrStatus
+                            if (state.bpm > 0) "Z$activeHrZone LOCKED" else state.hrStatus
                         }
                         Text(
                             text = secondaryLabel,
                             style = TabularStyle,
-                            color = SignalRose,
+                            color = hrPillColor,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )

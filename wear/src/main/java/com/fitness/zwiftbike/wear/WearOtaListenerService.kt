@@ -37,6 +37,13 @@ class WearOtaListenerService : WearableListenerService() {
                                 cmd.substringAfter(":").trim().uppercase()
                             )
                         }
+                        cmd.startsWith("SET_MAX_HR:", ignoreCase = true) -> {
+                            action = SensorWorkoutService.ACTION_SET_MAX_HR
+                            putExtra(
+                                SensorWorkoutService.EXTRA_MAX_HR,
+                                cmd.substringAfter(":").trim().toIntOrNull() ?: 190
+                            )
+                        }
                         else -> return
                     }
                 }

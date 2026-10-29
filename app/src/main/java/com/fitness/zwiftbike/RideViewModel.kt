@@ -66,7 +66,16 @@ data class RideUiState(
     val isMapModalOpen: Boolean = false,
     val isStravaModalOpen: Boolean = false,
     val isUpdateModalOpen: Boolean = false,
-    val installedVersionName: String = "v1.3.5",
+    val isProfileModalOpen: Boolean = false,
+    val riderWeightKg: Float = 70f,
+    val bikeWeightKg: Float = 9f,
+    val ftpWatts: Int = 220,
+    val restingHr: Int = 60,
+    val maxHr: Int = 190,
+    val riderAge: Int = 30,
+    val powerZone: Int = 1,
+    val hrZone: Int = 1,
+    val installedVersionName: String = "v1.3.6",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
@@ -137,12 +146,39 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     private fun resolveInstalledVersion(app: Application): String {
         return runCatching {
             val info = app.packageManager.getPackageInfo(app.packageName, 0)
-            val vName = info.versionName ?: "1.3.5"
+            val vName = info.versionName ?: "1.3.6"
             if (vName.startsWith("v")) vName else "v$vName"
-        }.getOrDefault("v1.3.5")
+        }.getOrDefault("v1.3.6")
+    }
+
+    private fun loadSavedProfile(app: Application) {
+        val prefs = app.getSharedPreferences("velopulse_rider_profile", Context.MODE_PRIVATE)
+        val weight = prefs.getFloat("riderWeightKg", 70f).coerceIn(35f, 180f)
+        val bikeWeight = prefs.getFloat("bikeWeightKg", 9f).coerceIn(5f, 25f)
+        val ftp = prefs.getInt("ftpWatts", 220).coerceIn(60, 550)
+        val restHr = prefs.getInt("restingHr", 60).coerceIn(35, 100)
+        val maxHrVal = prefs.getInt("maxHr", 190).coerceIn(130, 230)
+        val age = prefs.getInt("riderAge", 30).coerceIn(12, 95)
+
+        physics.updateProfile(
+            riderWeightKg = weight,
+            bikeWeightKg = bikeWeight,
+            ftpWatts = ftp.toFloat(),
+            restingHr = restHr.toFloat(),
+            maxHr = maxHrVal.toFloat()
+        )
+        _uiState.value = _uiState.value.copy(
+            riderWeightKg = weight,
+            bikeWeightKg = bikeWeight,
+            ftpWatts = ftp,
+            restingHr = restHr,
+            maxHr = maxHrVal,
+            riderAge = age
+        )
     }
 
     init {
+        loadSavedProfile(application)
         receiver.start()
         startPhysicsLoop()
     }
@@ -265,12 +301,18 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                     if (draftingNow) append(" [DRAFT]")
                 }
 
+                val wRounded = stepResult.watts.roundToInt()
+                val pZone = CyclingPhysics.computePowerZone(wRounded, physics.ftpWatts)
+                val hZone = CyclingPhysics.computeHrZone(inputBpm, physics.maxHr)
+
                 _uiState.value = current.copy(
                     connectionState = nextConnState,
-                    watts = stepResult.watts.roundToInt(),
+                    watts = wRounded,
                     wattsPerKg = stepResult.wattsPerKg,
                     rpm = stepResult.effectiveRpm.roundToInt(),
                     bpm = inputBpm,
+                    powerZone = pZone,
+                    hrZone = hZone,
                     speedKmh = stepResult.speedKmh,
                     distanceKm = stepResult.distanceMeters / 1000f,
                     distanceMeters = stepResult.distanceMeters,
@@ -363,7 +405,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(
             isMapModalOpen = open,
             isStravaModalOpen = false,
-            isUpdateModalOpen = false
+            isUpdateModalOpen = false,
+            isProfileModalOpen = false
         )
     }
 
@@ -371,7 +414,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(
             isStravaModalOpen = open,
             isMapModalOpen = false,
-            isUpdateModalOpen = false
+            isUpdateModalOpen = false,
+            isProfileModalOpen = false
         )
     }
 
@@ -379,10 +423,78 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(
             isUpdateModalOpen = open,
             isMapModalOpen = false,
-            isStravaModalOpen = false
+            isStravaModalOpen = false,
+            isProfileModalOpen = false
         )
         if (open && _uiState.value.latestReleaseTag == "Unchecked") {
             checkGithubUpdates()
+        }
+    }
+
+    fun setProfileModalOpen(open: Boolean) {
+        _uiState.value = _uiState.value.copy(
+            isProfileModalOpen = open,
+            isMapModalOpen = false,
+            isStravaModalOpen = false,
+            isUpdateModalOpen = false
+        )
+    }
+
+    fun saveRiderProfile(
+        riderWeightKg: Float,
+        bikeWeightKg: Float,
+        ftpWatts: Int,
+        restingHr: Int,
+        maxHr: Int,
+        riderAge: Int
+    ) {
+        val safeWeight = riderWeightKg.coerceIn(35f, 180f)
+        val safeBike = bikeWeightKg.coerceIn(5f, 25f)
+        val safeFtp = ftpWatts.coerceIn(60, 550)
+        val safeRestHr = restingHr.coerceIn(35, 100)
+        val safeMaxHr = maxHr.coerceIn(130, 230).coerceAtLeast(safeRestHr + 30)
+        val safeAge = riderAge.coerceIn(12, 95)
+
+        physics.updateProfile(
+            riderWeightKg = safeWeight,
+            bikeWeightKg = safeBike,
+            ftpWatts = safeFtp.toFloat(),
+            restingHr = safeRestHr.toFloat(),
+            maxHr = safeMaxHr.toFloat()
+        )
+
+        val prefs = getApplication<Application>()
+            .getSharedPreferences("velopulse_rider_profile", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putFloat("riderWeightKg", safeWeight)
+            .putFloat("bikeWeightKg", safeBike)
+            .putInt("ftpWatts", safeFtp)
+            .putInt("restingHr", safeRestHr)
+            .putInt("maxHr", safeMaxHr)
+            .putInt("riderAge", safeAge)
+            .apply()
+
+        _uiState.value = _uiState.value.copy(
+            riderWeightKg = safeWeight,
+            bikeWeightKg = safeBike,
+            ftpWatts = safeFtp,
+            restingHr = safeRestHr,
+            maxHr = safeMaxHr,
+            riderAge = safeAge,
+            statusBannerMessage = "Saved Rider Profile: ${safeWeight.toInt()}kg, FTP ${safeFtp}W, Max HR $safeMaxHr BPM"
+        )
+
+        // Sync Max HR to watch so watch Z1-Z5 colors match the rider's custom threshold
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val nodeClient = Wearable.getNodeClient(getApplication<Application>())
+                val messageClient = Wearable.getMessageClient(getApplication<Application>())
+                val nodes = nodeClient.connectedNodes.await()
+                val payload = "SET_MAX_HR:$safeMaxHr".toByteArray(Charsets.UTF_8)
+                for (node in nodes) {
+                    messageClient.sendMessage(node.id, "/velopulse/control", payload).await()
+                }
+            }
         }
     }
 

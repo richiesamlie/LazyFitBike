@@ -21,11 +21,11 @@ data class PhysicsStepResult(
  * into estimated Power (Watts), Road Speed (km/h), Elevation Gain (m), and Course Slope (%).
  */
 class CyclingPhysics(
-    val riderWeightKg: Float = 70f,
-    val bikeWeightKg: Float = 9f,
-    val restingHr: Float = 60f,
-    val maxHr: Float = 190f,
-    val ftpWatts: Float = 220f
+    var riderWeightKg: Float = 70f,
+    var bikeWeightKg: Float = 9f,
+    var restingHr: Float = 60f,
+    var maxHr: Float = 190f,
+    var ftpWatts: Float = 220f
 ) {
     var currentSpeedKmh: Float = 0f
         private set
@@ -35,6 +35,70 @@ class CyclingPhysics(
         private set
     var totalCaloriesKcal: Float = 0f
         private set
+
+    fun updateProfile(
+        riderWeightKg: Float,
+        bikeWeightKg: Float,
+        ftpWatts: Float,
+        restingHr: Float,
+        maxHr: Float
+    ) {
+        this.riderWeightKg = riderWeightKg.coerceIn(35f, 180f)
+        this.bikeWeightKg = bikeWeightKg.coerceIn(5f, 25f)
+        this.ftpWatts = ftpWatts.coerceIn(60f, 550f)
+        this.restingHr = restingHr.coerceIn(35f, 100f)
+        this.maxHr = maxHr.coerceIn(130f, 230f).coerceAtLeast(this.restingHr + 30f)
+    }
+
+    companion object {
+        fun computePowerZone(watts: Int, ftpWatts: Float): Int {
+            if (watts <= 0) return 1
+            val pct = watts / ftpWatts.coerceAtLeast(60f)
+            return when {
+                pct < 0.55f -> 1
+                pct <= 0.75f -> 2
+                pct <= 0.90f -> 3
+                pct <= 1.05f -> 4
+                else -> 5
+            }
+        }
+
+        fun computeHrZone(bpm: Int, maxHr: Float): Int {
+            if (bpm <= 0) return 1
+            val pct = bpm / maxHr.coerceAtLeast(120f)
+            return when {
+                pct < 0.60f -> 1
+                pct <= 0.70f -> 2
+                pct <= 0.80f -> 3
+                pct <= 0.90f -> 4
+                else -> 5
+            }
+        }
+
+        fun zoneShortName(zone: Int): String = when (zone) {
+            1 -> "Z1 REC"
+            2 -> "Z2 END"
+            3 -> "Z3 TMP"
+            4 -> "Z4 THR"
+            else -> "Z5 MAX"
+        }
+
+        /** Tanaka formula: 208 - (0.7 * age) */
+        fun estimateMaxHrFromAge(age: Int): Int {
+            val safeAge = age.coerceIn(12, 95)
+            return (208.0 - 0.7 * safeAge).toInt().coerceIn(135, 215)
+        }
+
+        /** Estimates FTP (Watts) from rider weight and fitness level ("BEGINNER", "INTERMEDIATE", "ADVANCED"). */
+        fun estimateFtpFromWeightAndLevel(weightKg: Float, level: String): Int {
+            val wPerKg = when (level.uppercase()) {
+                "BEGINNER" -> 2.0f
+                "ADVANCED" -> 3.6f
+                else -> 2.8f // INTERMEDIATE
+            }
+            return (weightKg.coerceIn(35f, 180f) * wPerKg).toInt().coerceIn(80, 500)
+        }
+    }
 
     private fun computeHrPowerAndRpm(bpm: Int): Pair<Float, Float> {
         if (bpm < restingHr + 8f) return 0f to 0f
