@@ -143,15 +143,21 @@ class MainActivity : ComponentActivity() {
                 onSetUpdateModalOpen = rideViewModel::setUpdateModalOpen,
                 onSetProfileModalOpen = rideViewModel::setProfileModalOpen,
                 onSaveRiderProfile = rideViewModel::saveRiderProfile,
+                onSetSpectatorUrl = rideViewModel::setSpectatorEndpointUrl,
                 onCheckGithubUpdates = rideViewModel::checkGithubUpdates,
                 onDownloadPhoneUpdate = { rideViewModel.downloadAndInstallPhoneUpdate(context) },
                 onRelayWatchUpdate = { rideViewModel.downloadAndRelayWatchUpdate(context) },
                 onShareWatchApk = { rideViewModel.shareWatchUpdateApk(context) },
                 onExportStravaGpx = { rideViewModel.exportAndShareStravaGpx(context) },
+                onExportGoogleSheets = { rideViewModel.exportAndShareGoogleSheets(context) },
+                onExportCanvaStory = { rideViewModel.exportAndShareCanvaStory(context) },
+                onBackupGoogleDrive = { rideViewModel.backupRideToGoogleDrive(context) },
                 onUploadDirectToStrava = rideViewModel::uploadDirectToStrava,
                 onSetWorkoutModalOpen = rideViewModel::setWorkoutModalOpen,
                 onSetWorkoutSummaryModalOpen = rideViewModel::setWorkoutSummaryModalOpen,
                 onStartWorkout = rideViewModel::startWorkout,
+                onStartAiWorkout = rideViewModel::startAiGeneratedWorkout,
+                onScheduleWorkoutInCalendar = { rideViewModel.scheduleWorkoutInCalendar(context, it) },
                 onPauseWorkout = rideViewModel::pauseWorkout,
                 onResumeWorkout = rideViewModel::resumeWorkout,
                 onSkipWorkoutStep = rideViewModel::skipWorkoutStep,
@@ -340,15 +346,21 @@ fun LazyFitBikeCockpitScreen(
     onSetUpdateModalOpen: (Boolean) -> Unit,
     onSetProfileModalOpen: (Boolean) -> Unit,
     onSaveRiderProfile: (Float, Float, Int, Int, Int, Int) -> Unit,
+    onSetSpectatorUrl: (String) -> Unit = {},
     onCheckGithubUpdates: () -> Unit,
     onDownloadPhoneUpdate: () -> Unit,
     onRelayWatchUpdate: () -> Unit,
     onShareWatchApk: () -> Unit,
     onExportStravaGpx: () -> Unit,
+    onExportGoogleSheets: () -> Unit = {},
+    onExportCanvaStory: () -> Unit = {},
+    onBackupGoogleDrive: () -> Unit = {},
     onUploadDirectToStrava: (String) -> Unit,
     onSetWorkoutModalOpen: (Boolean) -> Unit,
     onSetWorkoutSummaryModalOpen: (Boolean) -> Unit,
     onStartWorkout: (Workout) -> Unit,
+    onStartAiWorkout: (String) -> Unit = {},
+    onScheduleWorkoutInCalendar: (Workout) -> Unit = {},
     onPauseWorkout: () -> Unit,
     onResumeWorkout: () -> Unit,
     onSkipWorkoutStep: () -> Unit,
@@ -360,6 +372,7 @@ fun LazyFitBikeCockpitScreen(
 ) {
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var stravaAccessToken by remember { mutableStateOf("") }
+    var aiWorkoutPrompt by remember { mutableStateOf("45 min sweet spot climbing session") }
     val latestState by rememberUpdatedState(state)
 
     LaunchedEffect(state.activeRouteId, state.activeRoutePolylineJson) {
@@ -1080,6 +1093,9 @@ fun LazyFitBikeCockpitScreen(
                 var ageInput by remember(state.riderAge) {
                     mutableStateOf(state.riderAge.toString())
                 }
+                var spectatorUrlInput by remember(state.spectatorEndpointUrl) {
+                    mutableStateOf(state.spectatorEndpointUrl)
+                }
 
                 Box(
                     modifier = Modifier.fillMaxWidth(),
@@ -1249,6 +1265,18 @@ fun LazyFitBikeCockpitScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
+                        // Spectator URL Configuration
+                        OutlinedTextField(
+                            value = spectatorUrlInput,
+                            onValueChange = { spectatorUrlInput = it.trim() },
+                            label = { Text("Live Spectator URL (Vercel / Next.js)", fontSize = 10.sp) },
+                            placeholder = { Text("https://spectator.vercel.app/api/telemetry", fontSize = 10.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
                         Button(
                             onClick = {
                                 onSaveRiderProfile(
@@ -1259,6 +1287,7 @@ fun LazyFitBikeCockpitScreen(
                                     maxHrInput.toIntOrNull() ?: state.maxHr,
                                     ageInput.toIntOrNull() ?: state.riderAge
                                 )
+                                onSetSpectatorUrl(spectatorUrlInput)
                                 onSetProfileModalOpen(false)
                             },
                             modifier = Modifier
@@ -1399,19 +1428,74 @@ fun LazyFitBikeCockpitScreen(
                                         )
                                     }
 
-                                    Button(
-                                        onClick = { onStartWorkout(w) },
-                                        modifier = Modifier
-                                            .heightIn(min = 40.dp)
-                                            .padding(start = 10.dp),
-                                        shape = RoundedCornerShape(6.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = AccentOrange,
-                                            contentColor = Color.White
-                                        )
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(start = 10.dp)
                                     ) {
-                                        Text("Start", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                        Button(
+                                            onClick = { onScheduleWorkoutInCalendar(w) },
+                                            modifier = Modifier.heightIn(min = 40.dp),
+                                            shape = RoundedCornerShape(6.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = Color(0xFF1E3A8A),
+                                                contentColor = Color(0xFF93C5FD)
+                                            )
+                                        ) {
+                                            Text("Schedule", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        Button(
+                                            onClick = { onStartWorkout(w) },
+                                            modifier = Modifier.heightIn(min = 40.dp),
+                                            shape = RoundedCornerShape(6.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = AccentOrange,
+                                                contentColor = Color.White
+                                            )
+                                        ) {
+                                            Text("Start", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                        }
                                     }
+                                }
+                            }
+
+                            // AI Workout Creator (Gemini Coach Integration)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF0F172A))
+                                    .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(8.dp))
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "⚡ AI WORKOUT CREATOR (GEMINI)",
+                                        color = Color(0xFF38BDF8),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                    OutlinedTextField(
+                                        value = aiWorkoutPrompt,
+                                        onValueChange = { aiWorkoutPrompt = it },
+                                        modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
+                                        textStyle = TextStyle(color = TextPrimaryWhite, fontSize = 11.sp),
+                                        placeholder = { Text("e.g. 30 min VO2 max attack", fontSize = 11.sp, color = TextMutedZinc) },
+                                        singleLine = true
+                                    )
+                                }
+                                Button(
+                                    onClick = { onStartAiWorkout(aiWorkoutPrompt) },
+                                    modifier = Modifier.heightIn(min = 40.dp),
+                                    shape = RoundedCornerShape(6.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF0284C7),
+                                        contentColor = Color.White
+                                    )
+                                ) {
+                                    Text("Generate & Ride", fontSize = 11.sp, fontWeight = FontWeight.Black)
                                 }
                             }
                         }
@@ -1588,23 +1672,91 @@ fun LazyFitBikeCockpitScreen(
                                 }
                             }
 
-                            // 1-Tap Strava Share
+                            // AI Coach Debrief (Gemini Sports Science)
+                            if (state.aiCoachDebrief.isNotBlank()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF0F172A))
+                                        .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(8.dp))
+                                        .padding(12.dp)
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            text = "🤖 AI COACH DEBRIEF (GEMINI SPORTS SCIENCE)",
+                                            color = Color(0xFF38BDF8),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                        Text(
+                                            text = state.aiCoachDebrief,
+                                            color = TextPrimaryWhite,
+                                            fontSize = 11.sp,
+                                            lineHeight = 16.sp
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Primary Hero Action: Strava
+                            Button(
+                                onClick = onExportStravaGpx,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AccentOrange,
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                Text("Share Workout to Strava (GPX)", fontSize = 13.sp, fontWeight = FontWeight.Black)
+                            }
+
+                            // Secondary Cloud & Social Exports Tray
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Button(
-                                    onClick = onExportStravaGpx,
+                                    onClick = onExportGoogleSheets,
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(min = 44.dp),
+                                        .weight(1f)
+                                        .heightIn(min = 40.dp),
                                     shape = RoundedCornerShape(8.dp),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = AccentOrange,
+                                        containerColor = SignalEmerald,
+                                        contentColor = Color.Black
+                                    )
+                                ) {
+                                    Text("Sheets CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Button(
+                                    onClick = onExportCanvaStory,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 40.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF7C3AED), // Canva Purple
                                         contentColor = Color.White
                                     )
                                 ) {
-                                    Text("Share Workout GPX to Strava", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text("Canva Story", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Button(
+                                    onClick = onBackupGoogleDrive,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 40.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF1E3A8A), // Drive Blue
+                                        contentColor = Color(0xFF93C5FD)
+                                    )
+                                ) {
+                                    Text("Drive Vault", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -1631,8 +1783,8 @@ fun LazyFitBikeCockpitScreen(
                                 onClick = {
                                     if (state.isWorkoutPaused) onResumeWorkout() else onPauseWorkout()
                                 },
-                                modifier = Modifier.heightIn(min = 44.dp),
-                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.heightIn(min = 52.dp),
+                                shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (state.isWorkoutPaused) SignalEmerald else BgControlDark,
                                     contentColor = TextPrimaryWhite
@@ -1640,20 +1792,20 @@ fun LazyFitBikeCockpitScreen(
                             ) {
                                 Text(
                                     text = if (state.isWorkoutPaused) "▶ Resume" else "⏸ Pause",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Black
                                 )
                             }
                             Button(
                                 onClick = onSkipWorkoutStep,
-                                modifier = Modifier.heightIn(min = 44.dp),
-                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.heightIn(min = 52.dp),
+                                shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = BgControlDark,
                                     contentColor = TextPrimaryWhite
                                 )
                             ) {
-                                Text("⏭ Skip Step", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("⏭ Skip Step", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -1897,39 +2049,39 @@ fun LazyFitBikeCockpitScreen(
                         Button(
                             onClick = { onChangeGear(-1) },
                             modifier = Modifier
-                                .widthIn(min = 48.dp)
-                                .heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                                .widthIn(min = 56.dp)
+                                .heightIn(min = 56.dp),
+                            shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = BgControlDark,
                                 contentColor = TextPrimaryWhite
                             )
                         ) {
-                            Text(text = "-", fontSize = 18.sp, fontWeight = FontWeight.Black)
+                            Text(text = "-", fontSize = 20.sp, fontWeight = FontWeight.Black)
                         }
 
                         Text(
                             text = "${state.gear} / 12",
                             style = TabularStyle,
                             color = AccentOrange,
-                            fontSize = 15.sp,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Black,
                             textAlign = TextAlign.Center,
-                            modifier = Modifier.width(52.dp)
+                            modifier = Modifier.width(56.dp)
                         )
 
                         Button(
                             onClick = { onChangeGear(1) },
                             modifier = Modifier
-                                .widthIn(min = 48.dp)
-                                .heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                                .widthIn(min = 56.dp)
+                                .heightIn(min = 56.dp),
+                            shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = AccentOrange,
                                 contentColor = TextPrimaryWhite
                             )
                         ) {
-                            Text(text = "+", fontSize = 18.sp, fontWeight = FontWeight.Black)
+                            Text(text = "+", fontSize = 20.sp, fontWeight = FontWeight.Black)
                         }
                     }
                 }

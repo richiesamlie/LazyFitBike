@@ -444,6 +444,8 @@
     const threeCanvas = document.getElementById('three-canvas');
     let renderer, scene, camera, cameraRig;
     let isThreeSupported = false;
+    let lastHudRenderTime = 0;
+    let contextLostListenerAttached = false;
 
     // Road & Environment objects
     let roadMesh, roadTexture, groundMesh, skyDome;
@@ -475,6 +477,25 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.1;
+
+        if (!contextLostListenerAttached) {
+          contextLostListenerAttached = true;
+          threeCanvas.addEventListener('webglcontextlost', function(e) {
+            e.preventDefault();
+            console.warn('WebGL context lost. Falling back to 2D HUD canvas.');
+            isThreeSupported = false;
+            threeCanvas.style.display = 'none';
+            fallback2dCanvas.style.display = 'block';
+          }, false);
+
+          threeCanvas.addEventListener('webglcontextrestored', function() {
+            console.info('WebGL context restored. Rebuilding Three.js scene.');
+            initThree();
+            isThreeSupported = true;
+            threeCanvas.style.display = 'block';
+            fallback2dCanvas.style.display = 'none';
+          }, false);
+        }
 
         scene = new THREE.Scene();
         scene.background = new THREE.Color(0x09090b);
@@ -1602,8 +1623,11 @@
             visorMesh.rotation.set(0, 0, -cameraInertiaRoll * 0.2);
           }
 
-          // 4. Update Visor HUD Canvas Texture
-          renderVisorHud(now);
+          // 4. Update Visor HUD Canvas Texture (throttled to ~30 FPS to save GPU memory bandwidth & prevent thermal throttling)
+          if (now - lastHudRenderTime >= 32) {
+            renderVisorHud(now);
+            lastHudRenderTime = now;
+          }
 
           // 5. Render Three.js Scene
           renderer.render(scene, camera);

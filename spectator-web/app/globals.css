@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-carbon: #09090B;
+  --bg-pod: #111116;
+  --bg-control: #18181B;
+  --border-subtle: #27272A;
+  --accent-orange: #F97316;
+  --signal-emerald: #34D399;
+  --zone1-gray: #71717A;
+  --zone2-blue: #38BDF8;
+  --zone3-green: #34D399;
+  --zone4-yellow: #FACC15;
+  --zone5-orange: #FB923C;
+  --zone6-red: #F87171;
+  --zone7-purple: #C084FC;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  background-color: #09090B;
+  color: #F4F4F5;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-pod {
+  background: rgba(18, 18, 22, 0.85);
+  border: 1px solid #27272A;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+}
+
+.hud-pod-active {
+  border-color: #F97316;
+  box-shadow: 0 0 24px rgba(249, 115, 22, 0.25);
+}
+
+.pulse-emerald {
+  animation: pulseEmerald 2s infinite ease-in-out;
+}
+
+@keyframes pulseEmerald {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.15);
+  }
+}

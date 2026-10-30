@@ -90,14 +90,16 @@ data class RideUiState(
     val riderAge: Int = 30,
     val powerZone: Int = 1,
     val hrZone: Int = 1,
-    val installedVersionName: String = "v1.3.9",
+    val installedVersionName: String = "v1.4.0",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
     val latestWatchApkUrl: String? = null,
     val updateDownloadProgress: Int = 0,
     val updateStatusMessage: String = "Tap Check GitHub to inspect richiesamlie/LazyFitBike releases.",
-    val statusBannerMessage: String = ""
+    val statusBannerMessage: String = "",
+    val aiCoachDebrief: String = "",
+    val spectatorEndpointUrl: String = ""
 )
 
 class RideViewModel(application: Application) : AndroidViewModel(application) {
@@ -187,6 +189,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         val restHr = prefs.getInt("restingHr", 60).coerceIn(35, 100)
         val maxHrVal = prefs.getInt("maxHr", 190).coerceIn(130, 230)
         val age = prefs.getInt("riderAge", 30).coerceIn(12, 95)
+        val specUrl = prefs.getString("spectatorEndpointUrl", "") ?: ""
 
         physics.updateProfile(
             riderWeightKg = weight,
@@ -201,7 +204,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             ftpWatts = ftp,
             restingHr = restHr,
             maxHr = maxHrVal,
-            riderAge = age
+            riderAge = age,
+            spectatorEndpointUrl = specUrl
         )
     }
 
@@ -293,11 +297,13 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
 
                 val gpsAfterStep = GpsRouteEngine.interpolateAtDistance(activeRoute, stepResult.distanceMeters)
 
+                var didTickWholeSec = false
                 if (stepResult.speedKmh > 0.1f || stepResult.watts > 0.5f) {
                     elapsedAccumulatorSec += dt
                     val wholeSec = elapsedAccumulatorSec.toInt()
                     if (wholeSec > lastRecordedElapsedSec) {
                         lastRecordedElapsedSec = wholeSec
+                        didTickWholeSec = true
                         val wInt = stepResult.watts.roundToInt()
                         val rInt = stepResult.effectiveRpm.roundToInt()
                         recordedPoints.add(
@@ -349,6 +355,34 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                 val wBias = wp?.intensityBiasPercent ?: 0
                 val wPaused = wp?.isPaused ?: false
                 val wName = wp?.workout?.name ?: ""
+
+                // Live Spectator Telemetry Broadcasting (Vercel companion or local spectator endpoint)
+                if (didTickWholeSec && _uiState.value.spectatorEndpointUrl.isNotBlank()) {
+                    val packet = SpectatorPacket(
+                        riderName = "LazyFit Cyclist",
+                        timestampMs = nowMs,
+                        powerWatts = wRounded,
+                        heartRateBpm = inputBpm,
+                        cadenceRpm = stepResult.effectiveRpm.roundToInt(),
+                        speedKmh = stepResult.speedKmh,
+                        distanceKm = stepResult.distanceMeters / 1000f,
+                        slopeGradePercent = stepResult.slopeGradePercent,
+                        normalizedPowerWatts = if (workoutWattsHistory.isNotEmpty()) WorkoutEngine.computeNormalizedPower(workoutWattsHistory) else wRounded,
+                        powerZone = pZone,
+                        hrZone = hZone,
+                        caloriesKcal = stepResult.caloriesKcal.roundToInt(),
+                        routeName = activeRoute.name,
+                        lat = gpsAfterStep.lat,
+                        lon = gpsAfterStep.lon,
+                        elevationMeters = gpsAfterStep.ele,
+                        workoutActive = isWorkoutActive,
+                        workoutName = wName,
+                        workoutStepName = wStepName,
+                        workoutTargetWatts = wTargetWatts,
+                        workoutRemainingSec = wRemaining
+                    )
+                    TelemetryBroadcaster.broadcastAsync(viewModelScope, _uiState.value.spectatorEndpointUrl, packet)
+                }
 
                 _uiState.value = current.copy(
                     connectionState = nextConnState,
@@ -412,13 +446,17 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun requestCustomOsrmRoute(startLat: Double, startLon: Double, endLat: Double, endLon: Double) {
+        val hasGmp = !GpsRouteEngine.googleMapsApiKey.isNullOrBlank()
         _uiState.value = _uiState.value.copy(
-            statusBannerMessage = "Fetching online road route from OSRM..."
+            statusBannerMessage = if (hasGmp) "Computing cycling route & elevation via Google Maps..." else "Fetching online road route from OSRM..."
         )
         viewModelScope.launch {
-            val osrmRoute = GpsRouteEngine.fetchOsrmRoute(startLat, startLon, endLat, endLon)
-            if (osrmRoute != null) {
-                applyNewRoute(osrmRoute, "Loaded OSRM road route (${String.format("%.1f", osrmRoute.totalDistanceMeters / 1000f)} km)")
+            val route = GpsRouteEngine.fetchBestRoute(startLat, startLon, endLat, endLon)
+            if (route != null) {
+                applyNewRoute(
+                    route,
+                    "Loaded ${route.region} route (${String.format("%.1f", route.totalDistanceMeters / 1000f)} km, +${route.totalElevationGainMeters.roundToInt()}m elevation)"
+                )
             } else {
                 val direct = GpsRouteEngine.buildRouteFromRawPoints(
                     id = "custom_direct_${System.currentTimeMillis()}",
@@ -892,7 +930,20 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         val stepTargetRpm = currentStep.targetCadenceRpm ?: 90
 
         val currentComp = WorkoutEngine.evaluateStepCompliance(wInt, stepTargetWatts)
-        val prompt = WorkoutEngine.pacingPrompt(wInt, stepTargetWatts, rInt, currentStep.targetCadenceRpm)
+        val prompt = GeminiCoachEngine.generateLiveCoachingCue(
+            AthleteCoachTelemetry(
+                currentWatts = wInt,
+                targetWatts = stepTargetWatts,
+                currentRpm = rInt,
+                targetRpm = stepTargetRpm,
+                currentBpm = bpm,
+                ftpWatts = physics.ftpWatts.toInt(),
+                stepRemainingSec = maxOf(0, currentStep.durationSeconds - (wp.stepElapsedSeconds + 1)),
+                stepName = currentStep.name,
+                slopeGradePercent = _uiState.value.slopeGradePercent,
+                isDrafting = _uiState.value.isDrafting
+            )
+        )
 
         val nextStepElapsed = wp.stepElapsedSeconds + 1
         val nextTotalElapsed = wp.totalElapsedSeconds + 1
@@ -1034,10 +1085,13 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
 
         sendControlMessageToWatch("END_WORKOUT")
 
+        val debrief = GeminiCoachEngine.generatePostRideDebrief(summary, _uiState.value.riderWeightKg)
+
         _uiState.value = _uiState.value.copy(
             isWorkoutActive = false,
             isWorkoutSummaryModalOpen = true,
-            statusBannerMessage = "Workout Complete! ${summary.workoutName}: TSS $tss, NP ${np}W"
+            statusBannerMessage = "Workout Complete! ${summary.workoutName}: TSS $tss, NP ${np}W",
+            aiCoachDebrief = debrief
         )
     }
 
@@ -1244,6 +1298,112 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(
             isWorkoutSummaryModalOpen = false,
             statusBannerMessage = "Updated FTP to $safeFtp W and synced to watch!"
+        )
+    }
+
+    fun exportAndShareGoogleSheets(context: Context) {
+        val summary = _workoutSummary.value ?: return
+        val file = GoogleSheetsSyncManager.exportAndShareGoogleSheetsCsv(
+            context = context,
+            summary = summary,
+            routeName = activeRoute.name,
+            riderWeightKg = _uiState.value.riderWeightKg,
+            distanceKm = _uiState.value.distanceKm,
+            caloriesKcal = _uiState.value.caloriesKcal,
+            avgRpm = _uiState.value.avgRpm,
+            avgBpm = _uiState.value.avgBpm
+        )
+        if (file != null) {
+            _uiState.value = _uiState.value.copy(
+                statusBannerMessage = "Exported telemetry CSV to Google Sheets"
+            )
+        }
+    }
+
+    fun exportAndShareCanvaStory(context: Context) {
+        val summary = _workoutSummary.value ?: return
+        val file = CanvaShareCardGenerator.generateAndShareStoryCard(
+            context = context,
+            summary = summary,
+            routeName = activeRoute.name,
+            routeRegion = activeRoute.region,
+            riderWeightKg = _uiState.value.riderWeightKg,
+            distanceKm = _uiState.value.distanceKm,
+            caloriesKcal = _uiState.value.caloriesKcal,
+            avgRpm = _uiState.value.avgRpm,
+            avgBpm = _uiState.value.avgBpm,
+            elevationWaypoints = activeRoute.waypoints
+        )
+        if (file != null) {
+            _uiState.value = _uiState.value.copy(
+                statusBannerMessage = "Created 1080x1920 Story Card & opened share sheet"
+            )
+        }
+    }
+
+    fun backupRideToGoogleDrive(context: Context) {
+        val snapshot = ensureNonEmptyTrackPoints()
+        val effectiveTitle = _workoutSummary.value?.workoutName?.let { "$it - ${activeRoute.name}" }
+            ?: _workoutProgress.value?.workout?.name?.let { "$it - ${activeRoute.name}" }
+            ?: activeRoute.name
+        runCatching {
+            val gpxXml = StravaSyncManager.buildStravaGpxXml(effectiveTitle, snapshot)
+            val ridesDir = java.io.File(context.cacheDir, "rides").apply { mkdirs() }
+            val fileName = GoogleDriveSyncManager.buildBackupFileName("GPX", effectiveTitle, "gpx")
+            val file = java.io.File(ridesDir, fileName).apply {
+                writeText(gpxXml, Charsets.UTF_8)
+            }
+            val success = GoogleDriveSyncManager.launchGoogleDriveBackup(
+                context = context,
+                file = file,
+                mimeType = "application/gpx+xml"
+            )
+            if (success) {
+                _uiState.value = _uiState.value.copy(
+                    statusBannerMessage = "Backing up ${file.name} to Google Drive Vault"
+                )
+            }
+        }.onFailure { err ->
+            _uiState.value = _uiState.value.copy(
+                statusBannerMessage = "Drive backup failed: ${err.message}"
+            )
+        }
+    }
+
+    fun setSpectatorEndpointUrl(url: String) {
+        val cleanUrl = url.trim()
+        val prefs = getApplication<Application>()
+            .getSharedPreferences("lazyfitbike_rider_profile", Context.MODE_PRIVATE)
+        prefs.edit().putString("spectatorEndpointUrl", cleanUrl).apply()
+        _uiState.value = _uiState.value.copy(
+            spectatorEndpointUrl = cleanUrl,
+            statusBannerMessage = if (cleanUrl.isNotEmpty()) "Live Spectator URL: $cleanUrl" else "Spectator broadcast disabled"
+        )
+    }
+
+    fun startAiGeneratedWorkout(prompt: String) {
+        val workout = GeminiCoachEngine.synthesizeWorkoutFromPrompt(prompt, _uiState.value.ftpWatts)
+        startWorkout(workout)
+    }
+
+    fun scheduleWorkoutInCalendar(context: Context, workout: Workout) {
+        val success = GoogleCalendarSyncManager.launchCalendarScheduler(
+            context = context,
+            workout = workout,
+            ftpWatts = _uiState.value.ftpWatts
+        )
+        if (success) {
+            _uiState.value = _uiState.value.copy(
+                statusBannerMessage = "Opened Google Calendar to schedule ${workout.name}"
+            )
+        }
+    }
+
+    fun applyRemotePhysicsConstants(configMap: Map<String, String>) {
+        val updated = FirebaseConfig.applyRemoteConfig(configMap)
+        physics.constants = updated
+        _uiState.value = _uiState.value.copy(
+            statusBannerMessage = "Updated aerodynamics & rolling resistance over-the-air"
         )
     }
 

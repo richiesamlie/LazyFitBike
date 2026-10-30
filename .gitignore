@@ -23,3 +23,8 @@ keystore/
 *.key
 *.p12
 *.pfx
+
+# Web companion build and dependencies
+**/node_modules/
+**/.next/
+**/.vercel/

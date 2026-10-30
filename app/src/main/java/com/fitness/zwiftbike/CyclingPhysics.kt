@@ -16,6 +16,14 @@ data class PhysicsStepResult(
     val caloriesKcal: Float
 )
 
+data class PhysicsConstants(
+    val cdaAero: Float = 0.32f,
+    val crrRolling: Float = 0.004f,
+    val airDensityRho: Float = 1.225f,
+    val draftingAeroFactor: Float = 0.75f,
+    val trainerDifficultyFactor: Float = 0.40f
+)
+
 /**
  * Deterministic road cycling physics engine converting either Ankle RPM or Wrist Heart Rate
  * into estimated Power (Watts), Road Speed (km/h), Elevation Gain (m), and Course Slope (%).
@@ -25,7 +33,8 @@ class CyclingPhysics(
     var bikeWeightKg: Float = 9f,
     var restingHr: Float = 60f,
     var maxHr: Float = 190f,
-    var ftpWatts: Float = 220f
+    var ftpWatts: Float = 220f,
+    var constants: PhysicsConstants = PhysicsConstants()
 ) {
     var currentSpeedKmh: Float = 0f
         private set
@@ -190,14 +199,14 @@ class CyclingPhysics(
         val vMs = currentSpeedKmh / 3.6f
         val totalMass = riderWeightKg + bikeWeightKg
 
-        val dragFactor = if (isDrafting) 0.75f else 1.0f
-        val fAero = 0.5f * 1.225f * 0.32f * dragFactor * vMs * vMs
-        val fRoll = totalMass * 9.81f * 0.004f
+        val dragFactor = if (isDrafting) constants.draftingAeroFactor else 1.0f
+        val fAero = 0.5f * constants.airDensityRho * constants.cdaAero * dragFactor * vMs * vMs
+        val fRoll = totalMass * 9.81f * constants.crrRolling
 
-        // Indoor Trainer Difficulty (40%) + virtual cassette mechanical advantage so steep climbs (e.g. +15.3% Alpe d'Huez) never stall at 0 km/h
+        // Indoor Trainer Difficulty (default 40%) + virtual cassette mechanical advantage
         val effectiveGrade = if (gradePercent > 0f) {
             val gearClimbFactor = (0.75f + (safeGear - 1) * 0.045f).coerceIn(0.75f, 1.25f)
-            (gradePercent * 0.40f * gearClimbFactor).coerceAtMost(6.0f)
+            (gradePercent * constants.trainerDifficultyFactor * gearClimbFactor).coerceAtMost(6.0f)
         } else {
             gradePercent * 0.60f
         }

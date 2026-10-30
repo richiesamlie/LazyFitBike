@@ -33,6 +33,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -238,6 +241,45 @@ fun WatchSensorScreen(
     onRequestPermissions: () -> Unit,
     onTriggerGithubUpdate: () -> Unit
 ) {
+    var isStealthBatterySaver by remember { mutableStateOf(false) }
+
+    if (isStealthBatterySaver) {
+        // Pure black AMOLED screen (subpixels physically turned off, >80% display power reduction)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(BgPureBlack)
+                .clickable { isStealthBatterySaver = false }
+                .padding(20.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                val pulseText = if (state.mode == "ANKLE") {
+                    "${state.rpm.roundToInt()} RPM"
+                } else {
+                    if (state.bpm > 0) "${state.bpm} BPM" else "..."
+                }
+                Text(
+                    text = pulseText,
+                    color = Color(0xFF52525B), // Dim zinc text
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold,
+                    style = TabularStyle
+                )
+                Text(
+                    text = "AMOLED ECO · TAP TO WAKE",
+                    color = Color(0xFF3F3F46),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        return
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -355,10 +397,11 @@ fun WatchSensorScreen(
                     color = primaryColor,
                     fontSize = 42.sp,
                     fontWeight = FontWeight.Black,
-                    textAlign = TextAlign.Center
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.clickable { isStealthBatterySaver = true }
                 )
                 Text(
-                    text = primaryUnit,
+                    text = "$primaryUnit · ECO",
                     color = if (state.bpm > 0 || state.rpm >= 5f) primaryColor else TextMutedZinc,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold

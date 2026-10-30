@@ -6,11 +6,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -59,6 +61,14 @@ data class InterpolatedGpsPoint(
  * OSRM online road routing, and distance-to-coordinate interpolation.
  */
 object GpsRouteEngine {
+
+    const val GMP_SOLUTION_ID = "gmp_git_agentskills_v1"
+    private const val GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
+    private const val GOOGLE_ELEVATION_URL = "https://maps.googleapis.com/maps/api/elevation/json"
+
+    @Volatile
+    var googleMapsApiKey: String? = System.getProperty("GOOGLE_MAPS_API_KEY")
+        ?: System.getenv("GOOGLE_MAPS_API_KEY")
 
     val presetRoutes: List<GpsRoute> by lazy {
         listOf(
@@ -258,7 +268,206 @@ object GpsRouteEngine {
     }
 
     /**
-     * Queries the public OSRM road routing server to build a real road route between two map taps.
+     * Decodes an encoded polyline string into an ordered list of (latitude, longitude) coordinates.
+     * Complies with Google Maps Encoded Polyline Algorithm Format.
+     */
+    fun decodePolyline(encoded: String): List<Pair<Double, Double>> {
+        val poly = ArrayList<Pair<Double, Double>>()
+        var index = 0
+        val len = encoded.length
+        var lat = 0
+        var lng = 0
+
+        while (index < len) {
+            var b: Int
+            var shift = 0
+            var result = 0
+            do {
+                if (index >= len) break
+                b = encoded[index++].code - 63
+                result = result or ((b and 0x1f) shl shift)
+                shift += 5
+            } while (b >= 0x20)
+            val dlat = if ((result and 1) != 0) (result shr 1).inv() else (result shr 1)
+            lat += dlat
+
+            shift = 0
+            result = 0
+            do {
+                if (index >= len) break
+                b = encoded[index++].code - 63
+                result = result or ((b and 0x1f) shl shift)
+                shift += 5
+            } while (b >= 0x20)
+            val dlng = if ((result and 1) != 0) (result shr 1).inv() else (result shr 1)
+            lng += dlng
+
+            val pLat = lat.toDouble() / 1E5
+            val pLng = lng.toDouble() / 1E5
+            poly.add(Pair(pLat, pLng))
+        }
+        return poly
+    }
+
+    /**
+     * Samples real-world elevation from the Google Maps Elevation API for a set of coordinates.
+     * Appends required solution attribution solution_id=gmp_git_agentskills_v1.
+     */
+    suspend fun fetchGooglePathElevation(
+        coords: List<Pair<Double, Double>>,
+        apiKey: String
+    ): List<Triple<Double, Double, Double>>? = withContext(Dispatchers.IO) {
+        if (coords.size < 2 || apiKey.isBlank()) return@withContext null
+        runCatching {
+            // Up to 512 points allowed per Google Maps Elevation API request
+            val sampledCoords = if (coords.size <= 450) {
+                coords
+            } else {
+                val step = coords.size.toDouble() / 450.0
+                (0 until 450).map { coords[(it * step).toInt().coerceIn(coords.indices)] } + listOf(coords.last())
+            }
+
+            val pathParam = sampledCoords.joinToString("|") { String.format(Locale.US, "%.6f,%.6f", it.first, it.second) }
+            val encodedPath = URLEncoder.encode(pathParam, "UTF-8")
+            val urlStr = "$GOOGLE_ELEVATION_URL?path=$encodedPath&samples=${sampledCoords.size}&key=$apiKey&solution_id=$GMP_SOLUTION_ID"
+
+            val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 7000
+                readTimeout = 7000
+                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.0")
+            }
+
+            try {
+                if (conn.responseCode !in 200..299) return@withContext null
+                val responseText = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val root = JSONObject(responseText)
+                if (root.optString("status") != "OK") return@withContext null
+                val results = root.optJSONArray("results") ?: return@withContext null
+
+                val pointsWithElevation = ArrayList<Triple<Double, Double, Double>>(results.length())
+                for (i in 0 until results.length()) {
+                    val item = results.getJSONObject(i)
+                    val ele = item.optDouble("elevation", 50.0)
+                    val loc = item.optJSONObject("location")
+                    val lat = loc?.optDouble("lat") ?: sampledCoords.getOrNull(i)?.first ?: 0.0
+                    val lng = loc?.optDouble("lng") ?: sampledCoords.getOrNull(i)?.second ?: 0.0
+                    pointsWithElevation.add(Triple(lat, lng, ele))
+                }
+                if (pointsWithElevation.size >= 2) pointsWithElevation else null
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * Computes a dedicated cycling route via Google Maps Platform Routes API v2 (travelMode=BICYCLE)
+     * and enriches the path with real topographical elevations via Google Maps Elevation API.
+     */
+    suspend fun fetchGoogleBicyclingRoute(
+        startLat: Double,
+        startLon: Double,
+        endLat: Double,
+        endLon: Double,
+        apiKey: String
+    ): GpsRoute? = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) return@withContext null
+        runCatching {
+            val requestJson = JSONObject().apply {
+                put("origin", JSONObject().apply {
+                    put("location", JSONObject().apply {
+                        put("latLng", JSONObject().apply {
+                            put("latitude", startLat)
+                            put("longitude", startLon)
+                        })
+                    })
+                })
+                put("destination", JSONObject().apply {
+                    put("location", JSONObject().apply {
+                        put("latLng", JSONObject().apply {
+                            put("latitude", endLat)
+                            put("longitude", endLon)
+                        })
+                    })
+                })
+                put("travelMode", "BICYCLE")
+                put("polylineQuality", "HIGH_QUALITY")
+                put("internalUsageAttributionIds", JSONArray().apply {
+                    put(GMP_SOLUTION_ID)
+                })
+            }
+
+            val conn = (URL(GOOGLE_ROUTES_URL).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 7000
+                readTimeout = 7000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                setRequestProperty("X-Goog-Api-Key", apiKey)
+                setRequestProperty("X-Goog-FieldMask", "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline")
+                setRequestProperty("X-Goog-Maps-Solution-ID", GMP_SOLUTION_ID)
+                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.0")
+            }
+
+            try {
+                conn.outputStream.bufferedWriter(Charsets.UTF_8).use { it.write(requestJson.toString()) }
+
+                if (conn.responseCode !in 200..299) return@withContext null
+                val responseText = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val root = JSONObject(responseText)
+                val routes = root.optJSONArray("routes") ?: return@withContext null
+                if (routes.length() == 0) return@withContext null
+
+                val primaryRoute = routes.getJSONObject(0)
+                val polylineObj = primaryRoute.optJSONObject("polyline")
+                val encodedPolyline = polylineObj?.optString("encodedPolyline") ?: return@withContext null
+
+                val decodedCoords = decodePolyline(encodedPolyline)
+                if (decodedCoords.size < 2) return@withContext null
+
+                // Query Elevation API for real topographical grades
+                val pointsWithElevation = fetchGooglePathElevation(decodedCoords, apiKey)
+                    ?: decodedCoords.mapIndexed { idx, pair ->
+                        Triple(pair.first, pair.second, 85.0 + 15.0 * sin(idx * 0.15))
+                    }
+
+                buildRouteFromRawPoints(
+                    id = "google_bike_${System.currentTimeMillis()}",
+                    name = String.format(Locale.US, "Google Cycling Route (%.3f, %.3f)", startLat, startLon),
+                    region = "Google Maps Platform",
+                    rawPoints = pointsWithElevation
+                )
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * Resolves the best available route between two coordinates:
+     * 1. Google Maps Routes (Bicycle) + Elevation API if API key is present
+     * 2. OSRM Online Map routing (enriched with Google Elevation when key exists)
+     * 3. Fallback direct road
+     */
+    suspend fun fetchBestRoute(
+        startLat: Double,
+        startLon: Double,
+        endLat: Double,
+        endLon: Double,
+        customApiKey: String? = null
+    ): GpsRoute? {
+        val apiKey = customApiKey ?: googleMapsApiKey
+        if (!apiKey.isNullOrBlank()) {
+            val googleRoute = fetchGoogleBicyclingRoute(startLat, startLon, endLat, endLon, apiKey)
+            if (googleRoute != null) return googleRoute
+        }
+        return fetchOsrmRoute(startLat, startLon, endLat, endLon)
+    }
+
+    /**
+     * Queries the public OSRM road routing server to build a road route between two map taps,
+     * enriched with real Google Elevation when an API key is available.
      */
     suspend fun fetchOsrmRoute(
         startLat: Double,
@@ -279,7 +488,7 @@ object GpsRouteEngine {
                 requestMethod = "GET"
                 connectTimeout = 6000
                 readTimeout = 6000
-                setRequestProperty("User-Agent", "LazyFitBike-Android/1.3.6")
+                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.0")
             }
             if (conn.responseCode !in 200..299) return@withContext null
             val responseText = conn.inputStream.bufferedReader().use { it.readText() }
@@ -289,20 +498,30 @@ object GpsRouteEngine {
             val geometry = routes.getJSONObject(0).getJSONObject("geometry")
             val coords = geometry.getJSONArray("coordinates")
 
-            val rawPoints = ArrayList<Triple<Double, Double, Double>>(coords.length())
+            val coordsList = ArrayList<Pair<Double, Double>>(coords.length())
             for (i in 0 until coords.length()) {
                 val pt = coords.getJSONArray(i)
-                val lon = pt.getDouble(0)
-                val lat = pt.getDouble(1)
-                // Synthesize gentle rolling road elevation along custom OSRM routes
-                val syntheticEle = 85.0 + 18.0 * sin(i * 0.15)
-                rawPoints.add(Triple(lat, lon, syntheticEle))
+                coordsList.add(Pair(pt.getDouble(1), pt.getDouble(0))) // lat, lon
             }
+
+            val apiKey = googleMapsApiKey
+            val realElevations = if (!apiKey.isNullOrBlank()) {
+                fetchGooglePathElevation(coordsList, apiKey)
+            } else null
+
+            val rawPoints = realElevations ?: ArrayList<Triple<Double, Double, Double>>(coordsList.size).apply {
+                for (i in coordsList.indices) {
+                    val pair = coordsList[i]
+                    val syntheticEle = 85.0 + 18.0 * sin(i * 0.15)
+                    add(Triple(pair.first, pair.second, syntheticEle))
+                }
+            }
+
             if (rawPoints.size < 2) return@withContext null
             buildRouteFromRawPoints(
                 id = "osrm_${System.currentTimeMillis()}",
-                name = String.format(Locale.US, "Custom Road (%.3f, %.3f)", startLat, startLon),
-                region = "OSRM Online Map",
+                name = String.format(Locale.US, "Online Road (%.3f, %.3f)", startLat, startLon),
+                region = if (realElevations != null) "OSRM + Google Elevation" else "OSRM Online Map",
                 rawPoints = rawPoints
             )
         }.getOrNull()
