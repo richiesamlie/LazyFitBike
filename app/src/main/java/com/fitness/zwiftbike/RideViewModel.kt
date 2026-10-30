@@ -90,7 +90,7 @@ data class RideUiState(
     val riderAge: Int = 30,
     val powerZone: Int = 1,
     val hrZone: Int = 1,
-    val installedVersionName: String = "v1.3.8",
+    val installedVersionName: String = "v1.3.9",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
