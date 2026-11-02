@@ -7,12 +7,15 @@ plugins {
 android {
     namespace = "com.fitness.zwiftbike"
     compileSdk = 36
+    val appVersionCode = providers.gradleProperty("appVersionCode").get().toInt()
+    val appVersionName = providers.gradleProperty("appVersionName").get()
+
     defaultConfig {
         applicationId = "com.fitness.zwiftbike"
         minSdk = 26
         targetSdk = 36
-        versionCode = 21
-        versionName = "1.4.1"
+        versionCode = appVersionCode
+        versionName = appVersionName
     }
 
     val keystoreFile = file(System.getenv("KEYSTORE_FILE") ?: "../keystore/lazyfitbike.jks")
@@ -53,7 +56,7 @@ android {
     buildFeatures {
         compose = true
         aidl = false
-        buildConfig = false
+        buildConfig = true
         shaders = false
     }
 

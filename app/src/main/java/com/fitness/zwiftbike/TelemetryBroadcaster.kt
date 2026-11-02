@@ -177,7 +177,7 @@ object TelemetryBroadcaster {
                 this.connectTimeout = connectTimeoutMs
                 this.readTimeout = readTimeoutMs
                 setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.1")
+                setRequestProperty("User-Agent", "LazyFitBike-Android/${BuildConfig.VERSION_NAME}")
                 setRequestProperty("X-LazyFit-Device", "Android-Phone")
             }
 

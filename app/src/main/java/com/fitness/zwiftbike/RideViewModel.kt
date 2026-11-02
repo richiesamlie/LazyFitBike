@@ -92,7 +92,7 @@ data class RideUiState(
     val riderAge: Int = 30,
     val powerZone: Int = 1,
     val hrZone: Int = 1,
-    val installedVersionName: String = "v1.4.1",
+    val installedVersionName: String = "v${BuildConfig.VERSION_NAME}",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
@@ -216,9 +216,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     private fun resolveInstalledVersion(app: Application): String {
         return runCatching {
             val info = app.packageManager.getPackageInfo(app.packageName, 0)
-            val vName = info.versionName ?: "1.3.7"
+            val vName = info.versionName ?: BuildConfig.VERSION_NAME
             if (vName.startsWith("v")) vName else "v$vName"
-        }.getOrDefault("v1.3.7")
+        }.getOrDefault("v${BuildConfig.VERSION_NAME}")
     }
 
     private fun loadSavedProfile(app: Application) {
@@ -1551,38 +1551,35 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     @android.annotation.SuppressLint("MissingPermission")
     fun centerMapOnMyLocation(context: Context) {
         val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
-        if (locationManager == null) {
-            _uiState.update { it.copy(statusBannerMessage = "Location service unavailable on this device.") }
-            return
-        }
-
         val providers = listOf(
+            "fused",
             android.location.LocationManager.GPS_PROVIDER,
             android.location.LocationManager.NETWORK_PROVIDER,
             android.location.LocationManager.PASSIVE_PROVIDER
         )
 
         var bestLocation: android.location.Location? = null
-        for (provider in providers) {
-            val loc = runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull()
-            if (loc != null && (bestLocation == null || loc.time > bestLocation.time)) {
-                bestLocation = loc
+        if (locationManager != null) {
+            for (provider in providers) {
+                val loc = runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull()
+                if (loc != null && (bestLocation == null || loc.time > bestLocation.time)) {
+                    bestLocation = loc
+                }
             }
         }
 
+        var gotHardwareFix = false
         if (bestLocation != null) {
+            gotHardwareFix = true
             applyDetectedUserLocation(bestLocation.latitude, bestLocation.longitude)
-            return
+        } else {
+            _uiState.update { it.copy(statusBannerMessage = "Acquiring live GPS / Network location...") }
         }
 
-        _uiState.update { it.copy(statusBannerMessage = "Acquiring live GPS fix...") }
-        val activeProvider = providers.firstOrNull {
-            runCatching { locationManager.isProviderEnabled(it) }.getOrDefault(false)
-        } ?: android.location.LocationManager.NETWORK_PROVIDER
-
-        runCatching {
+        if (locationManager != null) {
             val listener = object : android.location.LocationListener {
                 override fun onLocationChanged(location: android.location.Location) {
+                    gotHardwareFix = true
                     runCatching { locationManager.removeUpdates(this) }
                     applyDetectedUserLocation(location.latitude, location.longitude)
                 }
@@ -1591,33 +1588,104 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                 @Deprecated("Deprecated in Java")
                 override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
             }
-            locationManager.requestLocationUpdates(
-                activeProvider,
-                0L,
-                0f,
-                listener,
-                android.os.Looper.getMainLooper()
-            )
-        }.onFailure { err ->
-            _uiState.update {
-                it.copy(statusBannerMessage = "Could not acquire GPS fix: ${err.message}")
+
+            for (prov in listOf("fused", android.location.LocationManager.NETWORK_PROVIDER, android.location.LocationManager.GPS_PROVIDER)) {
+                val enabled = runCatching { locationManager.isProviderEnabled(prov) }.getOrDefault(false)
+                if (enabled) {
+                    runCatching {
+                        locationManager.requestLocationUpdates(
+                            prov,
+                            0L,
+                            0f,
+                            listener,
+                            android.os.Looper.getMainLooper()
+                        )
+                    }
+                }
+            }
+        }
+
+        if (!gotHardwareFix) {
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val ipLatLon = fetchIpFallbackLocation()
+                if (ipLatLon != null && !gotHardwareFix) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        if (!gotHardwareFix) {
+                            applyDetectedUserLocation(ipLatLon.first, ipLatLon.second)
+                        }
+                    }
+                } else if (!gotHardwareFix) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        _uiState.update {
+                            it.copy(statusBannerMessage = "Please enable Device Location (GPS) or tap any 2 points on the map.")
+                        }
+                    }
+                }
             }
         }
     }
 
+    private fun fetchIpFallbackLocation(): Pair<Double, Double>? {
+        val urls = listOf("https://ipwho.is/", "https://get.geojs.io/v1/ip/geo.json")
+        for (urlStr in urls) {
+            val res = runCatching {
+                val conn = (java.net.URL(urlStr).openConnection() as java.net.HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 4000
+                    readTimeout = 4000
+                    setRequestProperty("User-Agent", "LazyFitBike-Android/${BuildConfig.VERSION_NAME}")
+                }
+                if (conn.responseCode in 200..299) {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    val json = org.json.JSONObject(body)
+                    val lat = json.optString("latitude").toDoubleOrNull()
+                    val lon = json.optString("longitude").toDoubleOrNull()
+                    if (lat != null && lon != null && (lat != 0.0 || lon != 0.0)) {
+                        Pair(lat, lon)
+                    } else null
+                } else null
+            }.getOrNull()
+            if (res != null) return res
+        }
+        return null
+    }
+
     private fun applyDetectedUserLocation(lat: Double, lon: Double) {
+        val starterRoute = GpsRouteEngine.buildRouteFromRawPoints(
+            id = "custom_gps_${System.currentTimeMillis()}",
+            name = "My GPS Location",
+            region = String.format(java.util.Locale.US, "GPS (%.4f, %.4f)", lat, lon),
+            rawPoints = listOf(
+                Triple(lat, lon, 50.0),
+                Triple(lat + 0.0022, lon + 0.0022, 54.0),
+                Triple(lat + 0.0045, lon + 0.0045, 58.0)
+            )
+        )
+        val statusMsg = String.format(
+            java.util.Locale.US,
+            "📍 Located (%.4f, %.4f) as Start Pin! Tap any Destination on the map.",
+            lat,
+            lon
+        )
+        applyNewRoute(starterRoute, statusMsg)
         _uiState.update {
             it.copy(
                 mapCenterTriggerId = System.currentTimeMillis(),
                 mapCenterLat = lat,
                 mapCenterLon = lon,
-                statusBannerMessage = String.format(
-                    java.util.Locale.US,
-                    "📍 Centered on your GPS (%.4f, %.4f) as Start Pin! Tap Destination on map.",
-                    lat,
-                    lon
-                )
+                statusBannerMessage = statusMsg
             )
+        }
+        viewModelScope.launch {
+            val roadStarter = GpsRouteEngine.fetchBestRoute(lat, lon, lat + 0.005, lon + 0.005)
+            if (roadStarter != null && _uiState.value.activeRouteId == starterRoute.id) {
+                val snapped = roadStarter.copy(
+                    id = starterRoute.id,
+                    name = "My GPS Location",
+                    region = starterRoute.region
+                )
+                applyNewRoute(snapped, statusMsg)
+            }
         }
     }
 

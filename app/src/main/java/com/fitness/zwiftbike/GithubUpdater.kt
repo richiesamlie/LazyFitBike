@@ -88,7 +88,7 @@ object GithubUpdater {
                 connectTimeout = 8000
                 readTimeout = 8000
                 setRequestProperty("Accept", "application/vnd.github+json")
-                setRequestProperty("User-Agent", "LazyFitBike-Updater/1.3")
+                setRequestProperty("User-Agent", "LazyFitBike-Updater/${BuildConfig.VERSION_NAME}")
             }
             if (conn.responseCode in 200..299) {
                 conn.inputStream.bufferedReader().use { it.readText() }
@@ -116,7 +116,7 @@ object GithubUpdater {
                     instanceFollowRedirects = true
                     connectTimeout = 12000
                     readTimeout = 15000
-                    setRequestProperty("User-Agent", "LazyFitBike-Updater/1.3")
+                    setRequestProperty("User-Agent", "LazyFitBike-Updater/${BuildConfig.VERSION_NAME}")
                 }
                 val code = conn.responseCode
                 if (code in 300..399 && redirects < 5) {

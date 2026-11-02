@@ -344,7 +344,7 @@ object GpsRouteEngine {
                 requestMethod = "GET"
                 connectTimeout = 7000
                 readTimeout = 7000
-                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.1")
+                setRequestProperty("User-Agent", "LazyFitBike-Android/${BuildConfig.VERSION_NAME}")
             }
 
             try {
@@ -416,7 +416,7 @@ object GpsRouteEngine {
                 setRequestProperty("X-Goog-Api-Key", apiKey)
                 setRequestProperty("X-Goog-FieldMask", "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline")
                 setRequestProperty("X-Goog-Maps-Solution-ID", GMP_SOLUTION_ID)
-                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.1")
+                setRequestProperty("User-Agent", "LazyFitBike-Android/${BuildConfig.VERSION_NAME}")
             }
 
             try {
@@ -497,7 +497,7 @@ object GpsRouteEngine {
                 requestMethod = "GET"
                 connectTimeout = 6000
                 readTimeout = 6000
-                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.1")
+                setRequestProperty("User-Agent", "LazyFitBike-Android/${BuildConfig.VERSION_NAME}")
             }
             if (conn.responseCode !in 200..299) return@withContext null
             val responseText = conn.inputStream.bufferedReader().use { it.readText() }

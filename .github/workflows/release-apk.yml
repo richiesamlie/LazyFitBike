@@ -64,13 +64,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
-          TAG="v${VERSION_NAME}"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            VERSION_NAME=$(grep -oP '^appVersionName\s*=\s*\K\S+' gradle.properties | tr -d '\r')
+            TAG="v${VERSION_NAME}"
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" LazyFitBike-phone.apk LazyFitBike-watch.apk --clobber
           else
             gh release create "$TAG" LazyFitBike-phone.apk LazyFitBike-watch.apk \
               --title "LazyFitBike $TAG (Phone + Galaxy Watch 4)" \
-              --notes "R8-minified OTA build ($TAG) with Structured Workout & Interval Training Engine." \
+              --notes "R8-minified OTA build ($TAG) for Phone and Galaxy Watch 4." \
               --latest
           fi

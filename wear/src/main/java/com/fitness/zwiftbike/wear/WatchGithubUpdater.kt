@@ -68,9 +68,9 @@ object WatchGithubUpdater {
     fun resolveInstalledVersion(context: Context): String {
         return runCatching {
             val info = context.packageManager.getPackageInfo(context.packageName, 0)
-            val vName = info.versionName ?: "1.3.1"
+            val vName = info.versionName ?: BuildConfig.VERSION_NAME
             if (vName.startsWith("v")) vName else "v$vName"
-        }.getOrDefault("v1.3.1")
+        }.getOrDefault("v${BuildConfig.VERSION_NAME}")
     }
 
     suspend fun downloadLatestWatchApkFromGithub(
@@ -123,7 +123,7 @@ object WatchGithubUpdater {
                     instanceFollowRedirects = true
                     connectTimeout = 12000
                     readTimeout = 15000
-                    setRequestProperty("User-Agent", "LazyFitBike-WatchUpdater/1.3")
+                    setRequestProperty("User-Agent", "LazyFitBike-WatchUpdater/${BuildConfig.VERSION_NAME}")
                 }
                 val code = conn.responseCode
                 if (code in 300..399 && redirects < 5) {
@@ -176,7 +176,7 @@ object WatchGithubUpdater {
                 connectTimeout = 8000
                 readTimeout = 8000
                 setRequestProperty("Accept", "application/vnd.github+json")
-                setRequestProperty("User-Agent", "LazyFitBike-WatchUpdater/1.3")
+                setRequestProperty("User-Agent", "LazyFitBike-WatchUpdater/${BuildConfig.VERSION_NAME}")
             }
             if (conn.responseCode in 200..299) {
                 conn.inputStream.bufferedReader().use { it.readText() }

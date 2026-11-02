@@ -106,12 +106,13 @@
   <div id="fullmap-container">
     <canvas id="fullmap-canvas"></canvas>
     <div id="map-controls">
+      <button class="map-btn" id="btn-locate-gps" type="button" style="background:#F97316;border-color:#F97316;color:#FFFFFF;">📍 My GPS</button>
       <button class="map-btn" id="btn-zoom-in" type="button">＋</button>
       <button class="map-btn" id="btn-zoom-out" type="button">－</button>
       <button class="map-btn" id="btn-recenter" type="button">◎ Rider</button>
       <button class="map-btn" id="btn-clear-pin" type="button">✕ Pin</button>
     </div>
-    <div id="map-hint">OpenStreetMap Live View: Drag to pan, or tap any 2 points to build a road route.</div>
+    <div id="map-hint">OpenStreetMap Live View: Tap '📍 My GPS', drag to pan, or tap any 2 points to build a road route.</div>
   </div>
 
   <script>
@@ -264,10 +265,12 @@
         if (Array.isArray(parsed) && parsed.length >= 2) {
           routeWaypoints = parsed;
           ensureRouteMetrics(routeWaypoints);
-          mapViewLat = null;
-          mapViewLon = null;
-          if (mapHintEl) {
-            mapHintEl.textContent = defaultMapHintText();
+          if (!tapStartLatLon) {
+            mapViewLat = null;
+            mapViewLon = null;
+            if (mapHintEl) {
+              mapHintEl.textContent = defaultMapHintText();
+            }
           }
         }
       } catch (e) {}
@@ -328,10 +331,17 @@
         }
       }
 
-      const shouldShowMap = Boolean(isMapModalOpen);
-      if (shouldShowMap !== state.isMapModalOpen) {
-        state.isMapModalOpen = shouldShowMap;
-        fullMapContainer.style.display = shouldShowMap ? 'block' : 'none';
+      const shouldShowModal = Boolean(isMapModalOpen);
+      const shouldShowInteractiveMap = shouldShowModal || state.cameraMode === 'MAP';
+      const targetLeft = shouldShowModal ? '310px' : '14px';
+      if (
+        shouldShowModal !== state.isMapModalOpen ||
+        (fullMapContainer.style.display === 'block') !== shouldShowInteractiveMap ||
+        fullMapContainer.style.left !== targetLeft
+      ) {
+        state.isMapModalOpen = shouldShowModal;
+        fullMapContainer.style.left = targetLeft;
+        fullMapContainer.style.display = shouldShowInteractiveMap ? 'block' : 'none';
         resize();
       }
     };
@@ -373,6 +383,15 @@
     const fullMapCtx = fullMapCanvas.getContext('2d');
     const mapHintEl = document.getElementById('map-hint');
 
+    document.getElementById('btn-locate-gps').addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      if (mapHintEl) {
+        mapHintEl.textContent = '📍 Requesting your live GPS location...';
+      }
+      if (window.AndroidBridge && window.AndroidBridge.onLocateMeRequested) {
+        window.AndroidBridge.onLocateMeRequested();
+      }
+    });
     document.getElementById('btn-zoom-in').addEventListener('click', function(ev) {
       ev.stopPropagation();
       mapZoom = Math.min(18, mapZoom + 1);
@@ -2014,8 +2033,8 @@
           renderer.render(scene, camera);
         }
 
-        // Modal map if open
-        if (state.isMapModalOpen) {
+        // Interactive map if modal is open or in MAP camera mode
+        if (state.isMapModalOpen || state.cameraMode === 'MAP') {
           renderGpsMap(fullMapCtx, 0, 0, fullMapCanvas.width, fullMapCanvas.height, mapZoom);
         }
       } catch (err) {
@@ -2038,8 +2057,9 @@
         renderer.setSize(w, h);
       }
 
-      if (state.isMapModalOpen) {
-        fullMapCanvas.width = Math.max(240, fullMapContainer.clientWidth || (w - 340));
+      if (state.isMapModalOpen || state.cameraMode === 'MAP') {
+        const leftOffset = state.isMapModalOpen ? 340 : 28;
+        fullMapCanvas.width = Math.max(240, fullMapContainer.clientWidth || (w - leftOffset));
         fullMapCanvas.height = Math.max(160, fullMapContainer.clientHeight || (h - 200));
       }
     }

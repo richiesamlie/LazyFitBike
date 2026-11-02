@@ -203,16 +203,28 @@ class MainActivity : ComponentActivity() {
 }
 
 private class MapJsBridge(
-    private val onRouteRequested: (Double, Double, Double, Double) -> Unit
+    private val onRouteRequested: (Double, Double, Double, Double) -> Unit,
+    private val onLocateRequested: () -> Unit
 ) {
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     @JavascriptInterface
     fun onMapRouteRequested(startLat: Double, startLon: Double, endLat: Double, endLon: Double) {
-        onRouteRequested(startLat, startLon, endLat, endLon)
+        mainHandler.post {
+            onRouteRequested(startLat, startLon, endLat, endLon)
+        }
+    }
+
+    @JavascriptInterface
+    fun onLocateMeRequested() {
+        mainHandler.post {
+            onLocateRequested()
+        }
     }
 }
 
 private object OsmTileProxy {
-    private const val USER_AGENT = "LazyFitBike/1.3.3 (https://github.com/richiesamlie/LazyFitBike)"
+    private const val USER_AGENT = "LazyFitBike/${BuildConfig.VERSION_NAME} (https://github.com/richiesamlie/LazyFitBike)"
     private const val REFERER = "https://github.com/richiesamlie/LazyFitBike"
     private val tileUrlRegex = Regex("""/(\d+)/(\d+)/(\d+)\.png""")
 
@@ -483,8 +495,8 @@ fun LazyFitBikeCockpitScreen(
                     )
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
-                    settings.userAgentString = "LazyFitBike/1.3.3 (https://github.com/richiesamlie/LazyFitBike)"
-                    addJavascriptInterface(MapJsBridge(onRequestOsrmRoute), "AndroidBridge")
+                    settings.userAgentString = "LazyFitBike/${BuildConfig.VERSION_NAME} (https://github.com/richiesamlie/LazyFitBike)"
+                    addJavascriptInterface(MapJsBridge(onRequestOsrmRoute, onLocateMeOnMap), "AndroidBridge")
                     webViewClient = object : WebViewClient() {
                         override fun shouldInterceptRequest(
                             view: WebView?,
@@ -732,6 +744,58 @@ fun LazyFitBikeCockpitScreen(
 
                         Spacer(modifier = Modifier.height(6.dp))
 
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Button(
+                                onClick = onLocateMeOnMap,
+                                modifier = Modifier
+                                    .weight(1.25f)
+                                    .heightIn(min = 46.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AccentOrange,
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                Text(
+                                    text = "📍 Locate Me (GPS)",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                            Button(
+                                onClick = onOpenGpxPicker,
+                                modifier = Modifier
+                                    .weight(0.75f)
+                                    .heightIn(min = 46.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = TextPrimaryWhite
+                                )
+                            ) {
+                                Text(
+                                    text = "Import .GPX",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        if (state.statusBannerMessage.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = state.statusBannerMessage,
+                                color = SignalEmerald,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
                         MiniGpsRouteCanvas(
                             waypoints = state.activeRouteWaypoints,
                             lat = state.currentLat,
@@ -739,6 +803,42 @@ fun LazyFitBikeCockpitScreen(
                         )
 
                         Spacer(modifier = Modifier.height(6.dp))
+
+                        val isPresetSelected = GpsRouteEngine.presetRoutes.any { it.id == state.activeRouteId }
+                        if (!isPresetSelected) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0x33F97316))
+                                    .border(1.dp, AccentOrange, RoundedCornerShape(8.dp))
+                                    .padding(8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "📍 ${state.activeRouteName}",
+                                        color = AccentOrange,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                    Text(
+                                        text = String.format(
+                                            Locale.US,
+                                            "%s : %.1f km : +%.0fm",
+                                            state.activeRouteRegion,
+                                            state.activeRouteDistanceMeters / 1000f,
+                                            state.activeRouteWaypoints.zipWithNext { a, b -> (b.ele - a.ele).coerceAtLeast(0.0) }.sum()
+                                        ),
+                                        style = TabularStyle,
+                                        color = TextPrimaryWhite,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
 
                         GpsRouteEngine.presetRoutes.forEach { preset ->
                             val isSelected = preset.id == state.activeRouteId
@@ -778,48 +878,6 @@ fun LazyFitBikeCockpitScreen(
                                         fontSize = 11.sp
                                     )
                                 }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Button(
-                                onClick = onLocateMeOnMap,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 46.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = AccentOrange,
-                                    contentColor = Color.White
-                                )
-                            ) {
-                                Text(
-                                    text = "📍 Locate Me (GPS)",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Black
-                                )
-                            }
-                            Button(
-                                onClick = onOpenGpxPicker,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 46.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = BgControlDark,
-                                    contentColor = TextPrimaryWhite
-                                )
-                            ) {
-                                Text(
-                                    text = "Import .GPX",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
                             }
                         }
 
