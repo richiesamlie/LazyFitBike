@@ -63,6 +63,28 @@
       pointer-events: none;
       font-variant-numeric: tabular-nums;
     }
+    #map-controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      gap: 6px;
+      z-index: 60;
+    }
+    .map-btn {
+      background: rgba(9, 9, 11, 0.90);
+      color: #F4F4F5;
+      border: 1px solid #3F3F46;
+      border-radius: 8px;
+      padding: 6px 11px;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .map-btn:active {
+      background: #F97316;
+      border-color: #F97316;
+    }
     #fallback-2d-canvas {
       display: none;
       position: absolute;
@@ -83,7 +105,13 @@
 
   <div id="fullmap-container">
     <canvas id="fullmap-canvas"></canvas>
-    <div id="map-hint">OpenStreetMap Live View: Tap any 2 points on the map to build an OSRM road route.</div>
+    <div id="map-controls">
+      <button class="map-btn" id="btn-zoom-in" type="button">＋</button>
+      <button class="map-btn" id="btn-zoom-out" type="button">－</button>
+      <button class="map-btn" id="btn-recenter" type="button">◎ Rider</button>
+      <button class="map-btn" id="btn-clear-pin" type="button">✕ Pin</button>
+    </div>
+    <div id="map-hint">OpenStreetMap Live View: Drag to pan, or tap any 2 points to build a road route.</div>
   </div>
 
   <script>
@@ -111,6 +139,7 @@
       isDrafting: false,
       nearestBotLabel: 'Bot C (2.5 W/kg) +12m',
       routeTotalMeters: 4000,
+      hasGoogleMapsKey: false,
       wheelRotationRad: 0,
       // Structured Workout State
       isWorkoutActive: false,
@@ -160,24 +189,114 @@
       { name: 'Bot E (3.6 W/kg)', speedMs: 10.9, dist: 310, color: '#c084fc', laneOffset: 0.7 }
     ];
 
+    function haversineMetersJs(lat1, lon1, lat2, lon2) {
+      const R = 6371000.0;
+      const dLat = (lat2 - lat1) * Math.PI / 180.0;
+      const dLon = (lon2 - lon1) * Math.PI / 180.0;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180.0) * Math.cos(lat2 * Math.PI / 180.0) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0.0, 1.0 - a)));
+      return R * c;
+    }
+
+    function computeBearingDegJs(lat1, lon1, lat2, lon2) {
+      const phi1 = lat1 * Math.PI / 180.0;
+      const phi2 = lat2 * Math.PI / 180.0;
+      const dLon = (lon2 - lon1) * Math.PI / 180.0;
+      const y = Math.sin(dLon) * Math.cos(phi2);
+      const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
+      const brng = Math.atan2(y, x) * 180.0 / Math.PI;
+      return (brng + 360.0) % 360.0;
+    }
+
+    function shortestAngleDeg(fromDeg, toDeg) {
+      return ((toDeg - fromDeg + 540.0) % 360.0) - 180.0;
+    }
+
+    function ensureRouteMetrics(wps) {
+      if (!Array.isArray(wps) || wps.length < 2) return;
+      let cumDist = 0;
+      for (let i = 0; i < wps.length; i++) {
+        const lat = Number(wps[i][0]) || 0;
+        const lon = Number(wps[i][1]) || 0;
+        const ele = Number(wps[i][2]) || 0;
+        if (i > 0) {
+          const prevLat = Number(wps[i - 1][0]) || 0;
+          const prevLon = Number(wps[i - 1][1]) || 0;
+          cumDist += haversineMetersJs(prevLat, prevLon, lat, lon);
+        }
+        const hasDist = wps[i].length >= 4 && wps[i][3] !== undefined && !isNaN(Number(wps[i][3]));
+        const finalDist = hasDist ? Number(wps[i][3]) : cumDist;
+        cumDist = finalDist;
+
+        let bearing = 0;
+        if (wps[i].length >= 5 && wps[i][4] !== undefined && !isNaN(Number(wps[i][4]))) {
+          bearing = Number(wps[i][4]);
+        } else if (i < wps.length - 1) {
+          const nextLat = Number(wps[i + 1][0]) || lat;
+          const nextLon = Number(wps[i + 1][1]) || lon;
+          bearing = computeBearingDegJs(lat, lon, nextLat, nextLon);
+        } else if (i > 0) {
+          bearing = Number(wps[i - 1][4]) || 0;
+        }
+        wps[i] = [lat, lon, ele, finalDist, bearing];
+      }
+      const total = Number(wps[wps.length - 1][3]) || 0;
+      if (total >= 50) {
+        state.routeTotalMeters = total;
+      }
+    }
+
+    ensureRouteMetrics(routeWaypoints);
+
+    function defaultMapHintText() {
+      return state.hasGoogleMapsKey
+        ? 'Google Maps Routes v2 (Bicycle) + Real Elevation Active: Drag to pan, or tap any 2 points to build a route.'
+        : 'OpenStreetMap Live View: Drag to pan, or tap any 2 points on the map to build an OSRM road route.';
+    }
+
     // Android bridge entry points
     window.setRoutePolyline = function(jsonArrayStr) {
       try {
         const parsed = typeof jsonArrayStr === 'string' ? JSON.parse(jsonArrayStr) : jsonArrayStr;
         if (Array.isArray(parsed) && parsed.length >= 2) {
           routeWaypoints = parsed;
+          ensureRouteMetrics(routeWaypoints);
+          mapViewLat = null;
+          mapViewLon = null;
           if (mapHintEl) {
-            mapHintEl.textContent = 'OpenStreetMap Live View: Tap any 2 points on the map to build an OSRM road route.';
+            mapHintEl.textContent = defaultMapHintText();
           }
         }
       } catch (e) {}
+    };
+
+    window.centerMapAtLocation = function(lat, lon, setAsStartPin) {
+      const nLat = Number(lat);
+      const nLon = Number(lon);
+      if (isNaN(nLat) || isNaN(nLon)) return;
+      mapViewLat = nLat;
+      mapViewLon = nLon;
+      mapZoom = 15;
+      if (setAsStartPin) {
+        tapStartLatLon = [nLat, nLon];
+        if (mapHintEl) {
+          mapHintEl.textContent =
+            '📍 Centered on your GPS (' + nLat.toFixed(4) + ', ' + nLon.toFixed(4) + ') as Start Pin! Tap any Destination on the map.';
+        }
+      } else if (mapHintEl) {
+        mapHintEl.textContent =
+          '📍 Centered on (' + nLat.toFixed(4) + ', ' + nLon.toFixed(4) + '). Tap Start Pin & Destination Pin.';
+      }
     };
 
     window.updateRideState = function(
       speedKmh, rpm, watts, gradePercent, distanceMeters,
       cameraMode, lat, lon, curvature, isMapModalOpen,
       bpm, wattsPerKg, ftpWatts, powerZone, hrZone, elapsedSeconds, activeRouteName,
-      isDrafting, nearestBotLabel, routeTotalMeters
+      isDrafting, nearestBotLabel, routeTotalMeters, hasGoogleMapsKey
     ) {
       state.speedKmh = Number(speedKmh) || 0;
       state.rpm = Number(rpm) || 0;
@@ -199,6 +318,15 @@
       if (isDrafting !== undefined) state.isDrafting = Boolean(isDrafting);
       if (nearestBotLabel) state.nearestBotLabel = String(nearestBotLabel);
       if (routeTotalMeters !== undefined && Number(routeTotalMeters) >= 100) state.routeTotalMeters = Number(routeTotalMeters);
+      if (hasGoogleMapsKey !== undefined) {
+        const nextGmp = Boolean(hasGoogleMapsKey);
+        if (nextGmp !== state.hasGoogleMapsKey) {
+          state.hasGoogleMapsKey = nextGmp;
+          if (mapHintEl && !tapStartLatLon) {
+            mapHintEl.textContent = defaultMapHintText();
+          }
+        }
+      }
 
       const shouldShowMap = Boolean(isMapModalOpen);
       if (shouldShowMap !== state.isMapModalOpen) {
@@ -230,10 +358,40 @@
     // OpenStreetMap 2D Map support (Modal & MAP mode)
     const osmTileCache = {};
     let tapStartLatLon = null;
+    let mapViewLat = null;
+    let mapViewLon = null;
+    let mapZoom = 15;
+    let isDraggingMap = false;
+    let didPanMoved = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragStartCenterTileX = 0;
+    let dragStartCenterTileY = 0;
+
     const fullMapContainer = document.getElementById('fullmap-container');
     const fullMapCanvas = document.getElementById('fullmap-canvas');
     const fullMapCtx = fullMapCanvas.getContext('2d');
     const mapHintEl = document.getElementById('map-hint');
+
+    document.getElementById('btn-zoom-in').addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      mapZoom = Math.min(18, mapZoom + 1);
+    });
+    document.getElementById('btn-zoom-out').addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      mapZoom = Math.max(4, mapZoom - 1);
+    });
+    document.getElementById('btn-recenter').addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      mapViewLat = null;
+      mapViewLon = null;
+      mapZoom = 15;
+    });
+    document.getElementById('btn-clear-pin').addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      tapStartLatLon = null;
+      if (mapHintEl) mapHintEl.textContent = defaultMapHintText();
+    });
 
     const fallback2dCanvas = document.getElementById('fallback-2d-canvas');
     const fallbackCtx = fallback2dCanvas.getContext('2d');
@@ -291,8 +449,10 @@
       targetCtx.fillStyle = '#0f172a';
       targetCtx.fillRect(boxX, boxY, boxW, boxH);
 
-      const centerTileX = lonToTileX(state.lon, zoom);
-      const centerTileY = latToTileY(state.lat, zoom);
+      const viewLat = mapViewLat !== null ? mapViewLat : state.lat;
+      const viewLon = mapViewLon !== null ? mapViewLon : state.lon;
+      const centerTileX = lonToTileX(viewLon, zoom);
+      const centerTileY = latToTileY(viewLat, zoom);
       const startTileX = Math.floor(centerTileX - (boxW / 512) - 1);
       const endTileX = Math.floor(centerTileX + (boxW / 512) + 1);
       const startTileY = Math.floor(centerTileY - (boxH / 512) - 1);
@@ -343,8 +503,8 @@
         }
       }
 
-      const rx = boxX + boxW * 0.5;
-      const ry = boxY + boxH * 0.5;
+      const rx = boxX + boxW * 0.5 + (lonToTileX(state.lon, zoom) - centerTileX) * 256;
+      const ry = boxY + boxH * 0.5 + (latToTileY(state.lat, zoom) - centerTileY) * 256;
 
       if (routeWaypoints.length >= 2) {
         targetCtx.lineCap = 'round';
@@ -384,8 +544,11 @@
         const sy = boxY + boxH * 0.5 + (latToTileY(tapStartLatLon[0], zoom) - centerTileY) * 256;
         targetCtx.fillStyle = '#22c55e';
         targetCtx.beginPath();
-        targetCtx.arc(sx, sy, 6, 0, Math.PI * 2);
+        targetCtx.arc(sx, sy, 7, 0, Math.PI * 2);
         targetCtx.fill();
+        targetCtx.strokeStyle = '#ffffff';
+        targetCtx.lineWidth = 2;
+        targetCtx.stroke();
       }
 
       const pulseRadius = 9 + (Math.sin(performance.now() * 0.008) + 1) * 4;
@@ -419,13 +582,73 @@
       targetCtx.restore();
     }
 
+    function onMapPointerDown(clientX, clientY) {
+      isDraggingMap = true;
+      didPanMoved = false;
+      dragStartX = clientX;
+      dragStartY = clientY;
+      const viewLat = mapViewLat !== null ? mapViewLat : state.lat;
+      const viewLon = mapViewLon !== null ? mapViewLon : state.lon;
+      dragStartCenterTileX = lonToTileX(viewLon, mapZoom);
+      dragStartCenterTileY = latToTileY(viewLat, mapZoom);
+    }
+
+    function onMapPointerMove(clientX, clientY) {
+      if (!isDraggingMap) return;
+      const dx = clientX - dragStartX;
+      const dy = clientY - dragStartY;
+      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+        didPanMoved = true;
+      }
+      if (didPanMoved) {
+        const newTileX = dragStartCenterTileX - dx / 256;
+        const newTileY = dragStartCenterTileY - dy / 256;
+        mapViewLon = tileXToLon(newTileX, mapZoom);
+        mapViewLat = Math.max(-85, Math.min(85, tileYToLat(newTileY, mapZoom)));
+      }
+    }
+
+    function onMapPointerUp() {
+      isDraggingMap = false;
+    }
+
+    fullMapCanvas.addEventListener('mousedown', function(ev) {
+      onMapPointerDown(ev.clientX, ev.clientY);
+    });
+    window.addEventListener('mousemove', function(ev) {
+      onMapPointerMove(ev.clientX, ev.clientY);
+    });
+    window.addEventListener('mouseup', function() {
+      onMapPointerUp();
+    });
+
+    fullMapCanvas.addEventListener('touchstart', function(ev) {
+      if (ev.touches.length === 1) {
+        onMapPointerDown(ev.touches[0].clientX, ev.touches[0].clientY);
+      }
+    }, { passive: true });
+    fullMapCanvas.addEventListener('touchmove', function(ev) {
+      if (ev.touches.length === 1) {
+        onMapPointerMove(ev.touches[0].clientX, ev.touches[0].clientY);
+      }
+    }, { passive: true });
+    fullMapCanvas.addEventListener('touchend', function() {
+      onMapPointerUp();
+    }, { passive: true });
+
     fullMapCanvas.addEventListener('click', function(ev) {
+      if (didPanMoved) {
+        didPanMoved = false;
+        return;
+      }
       const rect = fullMapCanvas.getBoundingClientRect();
       const clickX = ev.clientX - rect.left;
       const clickY = ev.clientY - rect.top;
-      const zoom = 15;
-      const centerTileX = lonToTileX(state.lon, zoom);
-      const centerTileY = latToTileY(state.lat, zoom);
+      const zoom = mapZoom;
+      const viewLat = mapViewLat !== null ? mapViewLat : state.lat;
+      const viewLon = mapViewLon !== null ? mapViewLon : state.lon;
+      const centerTileX = lonToTileX(viewLon, zoom);
+      const centerTileY = latToTileY(viewLat, zoom);
 
       const clickedTileX = centerTileX + (clickX - fullMapCanvas.width * 0.5) / 256;
       const clickedTileY = centerTileY + (clickY - fullMapCanvas.height * 0.5) / 256;
@@ -440,8 +663,9 @@
         const sLat = tapStartLatLon[0];
         const sLon = tapStartLatLon[1];
         tapStartLatLon = null;
+        const engineName = state.hasGoogleMapsKey ? 'Google Maps (Bicycle + Elevation)' : 'OSRM';
         mapHintEl.textContent =
-          'Requesting OSRM road route to (' + clickedLat.toFixed(4) + ', ' + clickedLon.toFixed(4) + ')...';
+          'Requesting ' + engineName + ' route to (' + clickedLat.toFixed(4) + ', ' + clickedLon.toFixed(4) + ')...';
         if (window.AndroidBridge && window.AndroidBridge.onMapRouteRequested) {
           window.AndroidBridge.onMapRouteRequested(sLat, sLon, clickedLat, clickedLon);
         }
@@ -542,12 +766,112 @@
       }
     }
 
-    function roadCurveAt(zMeters) {
-      return (
-        state.curvature * 1.0 +
-        Math.sin(zMeters * 0.0075) * 1.4 +
-        Math.cos(zMeters * 0.0032) * 0.8
-      );
+    function sampleRouteAtDistance(distMeters) {
+      if (!Array.isArray(routeWaypoints) || routeWaypoints.length < 2) {
+        return { lat: state.lat, lon: state.lon, ele: 0, bearingDeg: 0 };
+      }
+      if (routeWaypoints[0].length < 5) {
+        ensureRouteMetrics(routeWaypoints);
+      }
+      const lastWp = routeWaypoints[routeWaypoints.length - 1];
+      const totalDist = Math.max(10, Number(lastWp[3]) || state.routeTotalMeters || 4000);
+      const d = ((distMeters % totalDist) + totalDist) % totalDist;
+
+      let low = 0;
+      let high = routeWaypoints.length - 1;
+      while (low < high) {
+        const mid = (low + high) >> 1;
+        if ((Number(routeWaypoints[mid][3]) || 0) < d) {
+          low = mid + 1;
+        } else {
+          high = mid;
+        }
+      }
+      const idx = Math.max(0, low - 1);
+      const nextIdx = Math.min(routeWaypoints.length - 1, idx + 1);
+      const wp0 = routeWaypoints[idx];
+      const wp1 = routeWaypoints[nextIdx];
+      const d0 = Number(wp0[3]) || 0;
+      const d1 = Number(wp1[3]) || d0;
+      const segLen = d1 - d0;
+      const t = segLen > 0.05 ? Math.max(0, Math.min(1, (d - d0) / segLen)) : 0;
+
+      const lat = wp0[0] + (wp1[0] - wp0[0]) * t;
+      const lon = wp0[1] + (wp1[1] - wp0[1]) * t;
+      const ele = wp0[2] + (wp1[2] - wp0[2]) * t;
+
+      const b0 = Number(wp0[4]) || 0;
+      const b1 = Number(wp1[4]) || b0;
+      const dB = shortestAngleDeg(b0, b1);
+      const bearingDeg = (b0 + dB * t + 360.0) % 360.0;
+
+      return { lat: lat, lon: lon, ele: ele, bearingDeg: bearingDeg };
+    }
+
+    function projectRoadOffsetAhead(localDist, relD, pt0Override) {
+      if (relD <= 0.05) {
+        return { curveX: 0, slopeY: 0 };
+      }
+      const pt0 = pt0Override || sampleRouteAtDistance(localDist);
+      const pt1 = sampleRouteAtDistance(localDist + relD);
+
+      const dNorth = (pt1.lat - pt0.lat) * 111132.0;
+      const dEast = (pt1.lon - pt0.lon) * 111319.5 * Math.cos(pt0.lat * Math.PI / 180.0);
+      const h0Rad = pt0.bearingDeg * Math.PI / 180.0;
+
+      // Local right-hand lateral offset (+X = right of rider, -X = left of rider)
+      let lateralX = dEast * Math.cos(h0Rad) - dNorth * Math.sin(h0Rad);
+
+      // If road turns past 90 degrees (hairpin/switchback), blend heading delta so it stays swept to the turn side
+      const forwardZ = dEast * Math.sin(h0Rad) + dNorth * Math.cos(h0Rad);
+      const turnDeg = shortestAngleDeg(pt0.bearingDeg, pt1.bearingDeg);
+      if (forwardZ < relD * 0.35) {
+        const sign = turnDeg >= 0 ? 1 : -1;
+        lateralX = sign * Math.max(Math.abs(lateralX), relD * 0.42);
+      }
+
+      const nearTaper = Math.min(1.0, relD / 6.0);
+      const clampedX = Math.max(-42.0, Math.min(42.0, lateralX * nearTaper));
+
+      const dEle = pt1.ele - pt0.ele;
+      const rawSlopeY = Math.abs(dEle) > 0.01
+        ? dEle * 0.55
+        : relD * (state.gradePercent * 0.006);
+      const clampedY = Math.max(-28.0, Math.min(35.0, rawSlopeY));
+
+      return { curveX: clampedX, slopeY: clampedY };
+    }
+
+    function detectUpcomingTurn(localDist) {
+      const pt0 = sampleRouteAtDistance(localDist);
+      const pt35 = sampleRouteAtDistance(localDist + 35);
+      const pt75 = sampleRouteAtDistance(localDist + 75);
+      const delta35 = shortestAngleDeg(pt0.bearingDeg, pt35.bearingDeg);
+      const delta75 = shortestAngleDeg(pt0.bearingDeg, pt75.bearingDeg);
+
+      const activeDelta = Math.abs(delta35) >= 12 ? delta35 : delta75;
+      const turnDist = Math.abs(delta35) >= 12 ? 35 : 75;
+      const turnRate = Math.max(-2.2, Math.min(2.2, delta35 / 22.0));
+
+      if (Math.abs(activeDelta) >= 45) {
+        return {
+          label: (activeDelta > 0 ? '↱ SHARP RIGHT ' : '↰ SHARP LEFT ') + turnDist + 'M',
+          color: '#F43F5E',
+          turnRate: turnRate
+        };
+      }
+      if (Math.abs(activeDelta) >= 14) {
+        return {
+          label: (activeDelta > 0 ? '↱ RIGHT TURN ' : '↰ LEFT TURN ') + turnDist + 'M',
+          color: '#FBBF24',
+          turnRate: turnRate
+        };
+      }
+      return {
+        label: '↑ STRAIGHT ROAD',
+        color: '#34D399',
+        turnRate: turnRate
+      };
     }
 
     // Sky Dome, Ground Terrain, Trees, & Banners
@@ -1246,10 +1570,11 @@
         }
         hudCtx.restore();
       } else {
-        const pillW = 480;
+        const pillW = 500;
         const pillH = 54;
         const pillX = cx - pillW / 2;
         const pillY = 54;
+        const upcomingTurn = detectUpcomingTurn(state.distanceMeters);
         const pillBorder = state.isDrafting ? '#34D399' : 'rgba(255, 255, 255, 0.16)';
         drawGlassPanel(hudCtx, pillX, pillY, pillW, pillH, 27, pillBorder, 0.82);
 
@@ -1263,7 +1588,7 @@
         hudCtx.textAlign = 'left';
         hudCtx.fillStyle = '#F4F4F5';
         hudCtx.font = 'bold 13px sans-serif';
-        hudCtx.fillText(state.activeRouteName.toUpperCase(), pillX + 44, pillY + 25);
+        hudCtx.fillText(state.activeRouteName.toUpperCase(), pillX + 44, pillY + 24);
 
         hudCtx.fillStyle = state.isDrafting ? '#34D399' : '#A1A1AA';
         hudCtx.font = 'bold 11px sans-serif';
@@ -1273,7 +1598,11 @@
         hudCtx.fillStyle = gradeColor;
         hudCtx.font = '900 14px sans-serif';
         const gSign = state.gradePercent >= 0 ? '+' : '';
-        hudCtx.fillText(gSign + state.gradePercent.toFixed(1) + '%', pillX + pillW - 24, pillY + 32);
+        hudCtx.fillText(gSign + state.gradePercent.toFixed(1) + '%', pillX + pillW - 24, pillY + 24);
+
+        hudCtx.fillStyle = upcomingTurn.color;
+        hudCtx.font = 'bold 11px sans-serif';
+        hudCtx.fillText(upcomingTurn.label, pillX + pillW - 24, pillY + 42);
         hudCtx.restore();
       }
 
@@ -1401,6 +1730,13 @@
       hudCtx.font = 'bold 12px sans-serif';
       hudCtx.fillText('COURSE TELEMETRY', rightCapsuleX + 22, rightCapsuleY + 26);
 
+      const courseTurn = detectUpcomingTurn(state.distanceMeters);
+      hudCtx.textAlign = 'right';
+      hudCtx.fillStyle = courseTurn.color;
+      hudCtx.font = 'bold 11px sans-serif';
+      hudCtx.fillText(courseTurn.label, rightCapsuleX + capsuleW - 22, rightCapsuleY + 26);
+      hudCtx.textAlign = 'left';
+
       // Hero Speed
       hudCtx.fillStyle = '#FFFFFF';
       hudCtx.font = '900 54px sans-serif';
@@ -1498,12 +1834,14 @@
     // DYNAMIC WORLD & SCENERY DEFORMATION
     // ==========================================
     function updateWorldGeometry(localDist) {
+      const pt0 = sampleRouteAtDistance(localDist);
+
       // 1. Scroll Road Texture
       if (roadTexture) {
         roadTexture.offset.y = -(localDist * 0.1) % 1;
       }
 
-      // 2. Deform Road Ribbon Vertices along -Z
+      // 2. Deform Road Ribbon Vertices along -Z using real GPS route geometry & elevation
       if (roadMesh && roadMesh.geometry.userData.basePositions) {
         const pos = roadMesh.geometry.attributes.position;
         const base = roadMesh.geometry.userData.basePositions;
@@ -1512,23 +1850,21 @@
           const bZ = base[i * 3 + 2];
           const d = -bZ; // Distance ahead of rider along -Z
           const relD = Math.max(0, d);
-          const curveOffset = (roadCurveAt(localDist + relD) - roadCurveAt(localDist)) * (relD / 35);
-          const slopeOffset = relD * (state.gradePercent * 0.006);
-          pos.setX(i, bX + curveOffset);
-          pos.setY(i, slopeOffset);
+          const proj = projectRoadOffsetAhead(localDist, relD, pt0);
+          pos.setX(i, bX + proj.curveX);
+          pos.setY(i, proj.slopeY);
         }
         pos.needsUpdate = true;
       }
 
-      // 3. Scroll Trees along -Z
+      // 3. Scroll Trees along -Z following real GPS road curves & elevation
       if (treesGroup) {
         for (let i = 0; i < treesGroup.children.length; i++) {
           const tree = treesGroup.children[i];
           const d = ((tree.userData.baseDist - (localDist % 240)) + 240) % 240 - 10;
           const relD = Math.max(0, d);
-          const curveX = (roadCurveAt(localDist + relD) - roadCurveAt(localDist)) * (relD / 35);
-          const slopeY = relD * (state.gradePercent * 0.006);
-          tree.position.set(curveX + tree.userData.side * tree.userData.lateral, slopeY, -d);
+          const proj = projectRoadOffsetAhead(localDist, relD, pt0);
+          tree.position.set(proj.curveX + tree.userData.side * tree.userData.lateral, proj.slopeY, -d);
         }
       }
 
@@ -1538,9 +1874,8 @@
         const d = nextMilestone - localDist;
         if (d > 0 && d < 230) {
           archMesh.visible = true;
-          const curveX = (roadCurveAt(localDist + d) - roadCurveAt(localDist)) * (d / 35);
-          const slopeY = d * (state.gradePercent * 0.006);
-          archMesh.position.set(curveX, slopeY, -d);
+          const proj = projectRoadOffsetAhead(localDist, d, pt0);
+          archMesh.position.set(proj.curveX, proj.slopeY, -d);
           if (archMesh.userData.currentKm !== nextMilestone) {
             archMesh.userData.currentKm = nextMilestone;
             updateArchSignText(archSignCtx, archSignTexture, (nextMilestone / 1000).toFixed(1) + ' KM');
@@ -1550,7 +1885,7 @@
         }
       }
 
-      // 5. Position AI Bots along -Z
+      // 5. Position AI Bots along -Z on the real GPS road ribbon
       if (botsGroup) {
         const routeTot = Math.max(100, state.routeTotalMeters || 4000);
         const riderLoop = ((localDist % routeTot) + routeTot) % routeTot;
@@ -1562,9 +1897,8 @@
           if (relDist < 220) {
             botMesh.visible = true;
             const relD = Math.max(0, relDist);
-            const curveX = (roadCurveAt(localDist + relD) - roadCurveAt(localDist)) * (relD / 35);
-            const slopeY = relD * (state.gradePercent * 0.006);
-            botMesh.position.set(curveX + bData.laneOffset * 2.0, slopeY, -relDist);
+            const proj = projectRoadOffsetAhead(localDist, relD, pt0);
+            botMesh.position.set(proj.curveX + bData.laneOffset * 2.0, proj.slopeY, -relDist);
           } else {
             botMesh.visible = false;
           }
@@ -1578,6 +1912,7 @@
     let lastTime = performance.now();
     let cameraInertiaPitch = 0;
     let cameraInertiaRoll = 0;
+    let smoothedTurnRate = 0;
 
     function animate(now) {
       try {
@@ -1599,13 +1934,17 @@
         if (state.cameraMode === 'MAP') {
           threeCanvas.style.display = 'none';
           fallback2dCanvas.style.display = 'block';
-          renderGpsMap(fallbackCtx, 0, 0, fallback2dCanvas.width, fallback2dCanvas.height, 15);
+          renderGpsMap(fallbackCtx, 0, 0, fallback2dCanvas.width, fallback2dCanvas.height, mapZoom);
         } else if (isThreeSupported) {
           threeCanvas.style.display = 'block';
           fallback2dCanvas.style.display = 'none';
 
           const localDist = state.distanceMeters;
-          const currentCurve = roadCurveAt(localDist);
+          const turnInfo = detectUpcomingTurn(localDist);
+          const speedLeanFactor = Math.min(1.0, state.speedKmh / 18.0);
+          const targetCurve = turnInfo.turnRate * (0.35 + 0.65 * speedLeanFactor);
+          smoothedTurnRate += (targetCurve - smoothedTurnRate) * Math.min(1.0, 5.0 * dt);
+          const currentCurve = smoothedTurnRate;
           const currentSlope = state.gradePercent * 0.05;
 
           // 1. Update Cyclist and Bike
@@ -1677,7 +2016,7 @@
 
         // Modal map if open
         if (state.isMapModalOpen) {
-          renderGpsMap(fullMapCtx, 0, 0, fullMapCanvas.width, fullMapCanvas.height, 15);
+          renderGpsMap(fullMapCtx, 0, 0, fullMapCanvas.width, fullMapCanvas.height, mapZoom);
         }
       } catch (err) {
         console.error('Render error:', err);

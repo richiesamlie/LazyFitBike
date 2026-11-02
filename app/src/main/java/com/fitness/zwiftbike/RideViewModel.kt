@@ -92,7 +92,7 @@ data class RideUiState(
     val riderAge: Int = 30,
     val powerZone: Int = 1,
     val hrZone: Int = 1,
-    val installedVersionName: String = "v1.4.0",
+    val installedVersionName: String = "v1.4.1",
     val latestReleaseTag: String = "Unchecked",
     val latestReleaseName: String = "",
     val latestPhoneApkUrl: String? = null,
@@ -101,7 +101,11 @@ data class RideUiState(
     val updateStatusMessage: String = "Tap Check GitHub to inspect richiesamlie/LazyFitBike releases.",
     val statusBannerMessage: String = "",
     val aiCoachDebrief: String = "",
-    val spectatorEndpointUrl: String = ""
+    val spectatorEndpointUrl: String = "",
+    val googleMapsApiKey: String = "",
+    val mapCenterTriggerId: Long = 0L,
+    val mapCenterLat: Double = 0.0,
+    val mapCenterLon: Double = 0.0
 )
 
 class RideViewModel(application: Application) : AndroidViewModel(application) {
@@ -228,6 +232,10 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         val maxHrVal = prefs.getInt("maxHr", 190).coerceIn(130, 230)
         val age = prefs.getInt("riderAge", 30).coerceIn(12, 95)
         val specUrl = prefs.getString("spectatorEndpointUrl", "") ?: ""
+        val savedGmpKey = prefs.getString("googleMapsApiKey", "") ?: ""
+        if (savedGmpKey.isNotBlank()) {
+            GpsRouteEngine.googleMapsApiKey = savedGmpKey
+        }
 
         physics.updateProfile(
             riderWeightKg = weight,
@@ -243,7 +251,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             restingHr = restHr,
             maxHr = maxHrVal,
             riderAge = age,
-            spectatorEndpointUrl = specUrl
+            spectatorEndpointUrl = specUrl,
+            googleMapsApiKey = savedGmpKey
         )
     }
 
@@ -285,11 +294,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                     ConnectionState.LIVE_WATCH -> {
                         inputRpm = watchRpm
                         inputBpm = when {
-                            watchBpm >= 68 -> watchBpm
-                            watchBpm > 0 && current.sensorMode == "WRIST" -> 82 // Active workout floor when testing at resting HR
                             watchBpm > 0 -> watchBpm
                             watchRpm > 5f -> (92f + watchRpm * 0.55f).roundToInt()
-                            current.sensorMode == "WRIST" -> 82
                             else -> 0
                         }
                     }
@@ -1516,10 +1522,103 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         val prefs = getApplication<Application>()
             .getSharedPreferences("lazyfitbike_rider_profile", Context.MODE_PRIVATE)
         prefs.edit().putString("spectatorEndpointUrl", cleanUrl).apply()
-        _uiState.value = _uiState.value.copy(
-            spectatorEndpointUrl = cleanUrl,
-            statusBannerMessage = if (cleanUrl.isNotEmpty()) "Live Spectator URL: $cleanUrl" else "Spectator broadcast disabled"
+        _uiState.update {
+            it.copy(
+                spectatorEndpointUrl = cleanUrl,
+                statusBannerMessage = if (cleanUrl.isNotEmpty()) "Live Spectator URL: $cleanUrl" else "Spectator broadcast disabled"
+            )
+        }
+    }
+
+    fun setGoogleMapsApiKey(apiKey: String) {
+        val cleanKey = apiKey.trim()
+        val prefs = getApplication<Application>()
+            .getSharedPreferences("lazyfitbike_rider_profile", Context.MODE_PRIVATE)
+        prefs.edit().putString("googleMapsApiKey", cleanKey).apply()
+        GpsRouteEngine.googleMapsApiKey = cleanKey.ifBlank { null }
+        _uiState.update {
+            it.copy(
+                googleMapsApiKey = cleanKey,
+                statusBannerMessage = if (cleanKey.isNotEmpty()) {
+                    "Google Maps Platform Routes v2 (Bicycle) + Real Elevation enabled!"
+                } else {
+                    "Reverted to free OSRM road routing"
+                }
+            )
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    fun centerMapOnMyLocation(context: Context) {
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+        if (locationManager == null) {
+            _uiState.update { it.copy(statusBannerMessage = "Location service unavailable on this device.") }
+            return
+        }
+
+        val providers = listOf(
+            android.location.LocationManager.GPS_PROVIDER,
+            android.location.LocationManager.NETWORK_PROVIDER,
+            android.location.LocationManager.PASSIVE_PROVIDER
         )
+
+        var bestLocation: android.location.Location? = null
+        for (provider in providers) {
+            val loc = runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull()
+            if (loc != null && (bestLocation == null || loc.time > bestLocation.time)) {
+                bestLocation = loc
+            }
+        }
+
+        if (bestLocation != null) {
+            applyDetectedUserLocation(bestLocation.latitude, bestLocation.longitude)
+            return
+        }
+
+        _uiState.update { it.copy(statusBannerMessage = "Acquiring live GPS fix...") }
+        val activeProvider = providers.firstOrNull {
+            runCatching { locationManager.isProviderEnabled(it) }.getOrDefault(false)
+        } ?: android.location.LocationManager.NETWORK_PROVIDER
+
+        runCatching {
+            val listener = object : android.location.LocationListener {
+                override fun onLocationChanged(location: android.location.Location) {
+                    runCatching { locationManager.removeUpdates(this) }
+                    applyDetectedUserLocation(location.latitude, location.longitude)
+                }
+                override fun onProviderEnabled(provider: String) {}
+                override fun onProviderDisabled(provider: String) {}
+                @Deprecated("Deprecated in Java")
+                override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+            }
+            locationManager.requestLocationUpdates(
+                activeProvider,
+                0L,
+                0f,
+                listener,
+                android.os.Looper.getMainLooper()
+            )
+        }.onFailure { err ->
+            _uiState.update {
+                it.copy(statusBannerMessage = "Could not acquire GPS fix: ${err.message}")
+            }
+        }
+    }
+
+    private fun applyDetectedUserLocation(lat: Double, lon: Double) {
+        _uiState.update {
+            it.copy(
+                mapCenterTriggerId = System.currentTimeMillis(),
+                mapCenterLat = lat,
+                mapCenterLon = lon,
+                statusBannerMessage = String.format(
+                    java.util.Locale.US,
+                    "📍 Centered on your GPS (%.4f, %.4f) as Start Pin! Tap Destination on map.",
+                    lat,
+                    lon
+                )
+            )
+        }
     }
 
     fun startAiGeneratedWorkout(prompt: String) {

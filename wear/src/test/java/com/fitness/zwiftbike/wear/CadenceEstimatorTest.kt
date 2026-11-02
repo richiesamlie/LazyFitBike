@@ -63,4 +63,21 @@ class CadenceEstimatorTest {
             ts += 50_000_000L
         }
     }
+
+    @Test
+    fun stiffAnkleSinusoidalOscillationRecoversAccurateCadence() {
+        val estimator = CadenceEstimator()
+        val targetRpm = 80f
+        val freqHz = targetRpm / 60.0
+        var ts = 1_000_000_000L
+        var lastRpm = 0f
+        // Simulate stiff ankle tilting back-and-forth with peak amplitude 2.2 rad/s (mean omega ~1.4 rad/s, which alone would under-read as ~15 RPM)
+        repeat(60) { step ->
+            val tSec = step * 0.05
+            val wz = (2.2 * kotlin.math.sin(2.0 * PI * freqHz * tSec)).toFloat()
+            lastRpm = estimator.onGyroSample(0f, 0f, wz, ts)
+            ts += 50_000_000L
+        }
+        assertTrue("Expected cycle-fused RPM >= 60 for 80 RPM stiff-ankle pedaling, got $lastRpm", lastRpm in 60f..85f)
+    }
 }

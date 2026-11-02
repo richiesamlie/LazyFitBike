@@ -126,6 +126,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            val locationPermissionLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestMultiplePermissions()
+            ) { permissions ->
+                val granted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                    permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+                if (granted) {
+                    rideViewModel.centerMapOnMyLocation(context)
+                }
+            }
+
             val workoutSummary by rideViewModel.workoutSummary.collectAsState()
 
             LazyFitBikeCockpitScreen(
@@ -138,12 +148,33 @@ class MainActivity : ComponentActivity() {
                 onSelectPresetRoute = rideViewModel::selectPresetRoute,
                 onOpenGpxPicker = { gpxLauncher.launch("*/*") },
                 onRequestOsrmRoute = rideViewModel::requestCustomOsrmRoute,
+                onLocateMeOnMap = {
+                    val hasFine = androidx.core.content.ContextCompat.checkSelfPermission(
+                        context,
+                        android.Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    val hasCoarse = androidx.core.content.ContextCompat.checkSelfPermission(
+                        context,
+                        android.Manifest.permission.ACCESS_COARSE_LOCATION
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    if (hasFine || hasCoarse) {
+                        rideViewModel.centerMapOnMyLocation(context)
+                    } else {
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                android.Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    }
+                },
                 onSetMapModalOpen = rideViewModel::setMapModalOpen,
                 onSetStravaModalOpen = rideViewModel::setStravaModalOpen,
                 onSetUpdateModalOpen = rideViewModel::setUpdateModalOpen,
                 onSetProfileModalOpen = rideViewModel::setProfileModalOpen,
                 onSaveRiderProfile = rideViewModel::saveRiderProfile,
                 onSetSpectatorUrl = rideViewModel::setSpectatorEndpointUrl,
+                onSetGoogleMapsApiKey = rideViewModel::setGoogleMapsApiKey,
                 onCheckGithubUpdates = rideViewModel::checkGithubUpdates,
                 onDownloadPhoneUpdate = { rideViewModel.downloadAndInstallPhoneUpdate(context) },
                 onRelayWatchUpdate = { rideViewModel.downloadAndRelayWatchUpdate(context) },
@@ -285,7 +316,7 @@ private fun pushRoutePolylineToWebView(view: WebView?, polylineJson: String) {
 private fun pushRideStateToWebView(view: WebView?, state: RideUiState) {
     val jsCall = String.format(
         Locale.US,
-        "if(window.updateRideState){window.updateRideState(%.2f,%d,%d,%.2f,%.2f,'%s',%.6f,%.6f,%.3f,%b,%d,%.2f,%d,%d,%d,%d,'%s',%b,'%s',%.1f);}",
+        "if(window.updateRideState){window.updateRideState(%.2f,%d,%d,%.2f,%.2f,'%s',%.6f,%.6f,%.3f,%b,%d,%.2f,%d,%d,%d,%d,'%s',%b,'%s',%.1f,%b);}",
         state.speedKmh,
         state.rpm,
         state.watts,
@@ -305,7 +336,8 @@ private fun pushRideStateToWebView(view: WebView?, state: RideUiState) {
         state.activeRouteName.replace("'", "\\'"),
         state.isDrafting,
         state.nearestBotLabel.replace("'", "\\'"),
-        state.activeRouteDistanceMeters
+        state.activeRouteDistanceMeters,
+        state.googleMapsApiKey.isNotBlank()
     )
     view?.evaluateJavascript(jsCall, null)
 
@@ -344,12 +376,14 @@ fun LazyFitBikeCockpitScreen(
     onSelectPresetRoute: (String) -> Unit,
     onOpenGpxPicker: () -> Unit,
     onRequestOsrmRoute: (Double, Double, Double, Double) -> Unit,
+    onLocateMeOnMap: () -> Unit = {},
     onSetMapModalOpen: (Boolean) -> Unit,
     onSetStravaModalOpen: (Boolean) -> Unit,
     onSetUpdateModalOpen: (Boolean) -> Unit,
     onSetProfileModalOpen: (Boolean) -> Unit,
     onSaveRiderProfile: (Float, Float, Int, Int, Int, Int) -> Unit,
     onSetSpectatorUrl: (String) -> Unit = {},
+    onSetGoogleMapsApiKey: (String) -> Unit = {},
     onCheckGithubUpdates: () -> Unit,
     onDownloadPhoneUpdate: () -> Unit,
     onRelayWatchUpdate: () -> Unit,
@@ -382,6 +416,18 @@ fun LazyFitBikeCockpitScreen(
         pushRoutePolylineToWebView(webViewRef, state.activeRoutePolylineJson)
     }
 
+    LaunchedEffect(state.mapCenterTriggerId) {
+        if (state.mapCenterTriggerId > 0L) {
+            val js = String.format(
+                Locale.US,
+                "if(window.centerMapAtLocation){window.centerMapAtLocation(%.6f,%.6f,true);}",
+                state.mapCenterLat,
+                state.mapCenterLon
+            )
+            webViewRef?.evaluateJavascript(js, null)
+        }
+    }
+
     LaunchedEffect(
         state.speedKmh,
         state.rpm,
@@ -403,6 +449,7 @@ fun LazyFitBikeCockpitScreen(
         state.isDrafting,
         state.nearestBotLabel,
         state.activeRouteDistanceMeters,
+        state.googleMapsApiKey,
         state.isWorkoutActive,
         state.workoutName,
         state.workoutTargetWatts,
@@ -736,20 +783,107 @@ fun LazyFitBikeCockpitScreen(
 
                         Spacer(modifier = Modifier.height(6.dp))
 
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Button(
+                                onClick = onLocateMeOnMap,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 46.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AccentOrange,
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                Text(
+                                    text = "📍 Locate Me (GPS)",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                            Button(
+                                onClick = onOpenGpxPicker,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 46.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = TextPrimaryWhite
+                                )
+                            ) {
+                                Text(
+                                    text = "Import .GPX",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        var gmpKeyInput by remember(state.googleMapsApiKey) { mutableStateOf(state.googleMapsApiKey) }
+                        val hasGmpKey = state.googleMapsApiKey.isNotBlank()
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "ROUTING ENGINE",
+                                color = TextMutedZinc,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (hasGmpKey) "● GOOGLE MAPS + ELEVATION" else "● OSRM FREE ROUTING",
+                                color = if (hasGmpKey) SignalEmerald else Zone2Blue,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        OutlinedTextField(
+                            value = gmpKeyInput,
+                            onValueChange = { gmpKeyInput = it.trim() },
+                            label = {
+                                Text(
+                                    text = "Google Maps API Key (Routes v2 + Elevation)",
+                                    fontSize = 10.sp
+                                )
+                            },
+                            placeholder = {
+                                Text(
+                                    text = "AIzaSy... (Leave blank for free OSRM)",
+                                    fontSize = 10.sp
+                                )
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
                         Button(
-                            onClick = onOpenGpxPicker,
+                            onClick = { onSetGoogleMapsApiKey(gmpKeyInput) },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 48.dp),
+                                .heightIn(min = 40.dp),
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = BgControlDark,
-                                contentColor = TextPrimaryWhite
+                                containerColor = if (hasGmpKey) SignalEmerald else BgControlDark,
+                                contentColor = if (hasGmpKey) Color.Black else TextPrimaryWhite
                             )
                         ) {
                             Text(
-                                text = "Import .GPX Route File",
-                                fontSize = 12.sp,
+                                text = if (gmpKeyInput.isNotBlank()) "Activate Google Maps Routing" else "Use Free OSRM Routing",
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }

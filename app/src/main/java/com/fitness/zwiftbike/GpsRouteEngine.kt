@@ -35,15 +35,24 @@ data class GpsRoute(
     val waypoints: List<GpsWaypoint>
 ) {
     fun toCompactJsonArray(): String {
-        val arr = JSONArray()
-        for (wp in waypoints) {
-            val pt = JSONArray()
-            pt.put(wp.lat)
-            pt.put(wp.lon)
-            pt.put(wp.ele)
-            arr.put(pt)
+        return buildString(waypoints.size * 44 + 4) {
+            append('[')
+            waypoints.forEachIndexed { index, wp ->
+                if (index > 0) append(',')
+                append(
+                    String.format(
+                        Locale.US,
+                        "[%.6f,%.6f,%.1f,%.1f,%.1f]",
+                        wp.lat,
+                        wp.lon,
+                        wp.ele,
+                        wp.cumulativeDistMeters,
+                        wp.bearingDeg
+                    )
+                )
+            }
+            append(']')
         }
-        return arr.toString()
     }
 }
 
@@ -335,7 +344,7 @@ object GpsRouteEngine {
                 requestMethod = "GET"
                 connectTimeout = 7000
                 readTimeout = 7000
-                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.0")
+                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.1")
             }
 
             try {
@@ -407,7 +416,7 @@ object GpsRouteEngine {
                 setRequestProperty("X-Goog-Api-Key", apiKey)
                 setRequestProperty("X-Goog-FieldMask", "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline")
                 setRequestProperty("X-Goog-Maps-Solution-ID", GMP_SOLUTION_ID)
-                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.0")
+                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.1")
             }
 
             try {
@@ -488,7 +497,7 @@ object GpsRouteEngine {
                 requestMethod = "GET"
                 connectTimeout = 6000
                 readTimeout = 6000
-                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.0")
+                setRequestProperty("User-Agent", "LazyFitBike-Android/1.4.1")
             }
             if (conn.responseCode !in 200..299) return@withContext null
             val responseText = conn.inputStream.bufferedReader().use { it.readText() }

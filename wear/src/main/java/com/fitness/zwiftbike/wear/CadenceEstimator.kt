@@ -1,14 +1,25 @@
 package com.fitness.zwiftbike.wear
 
 import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.sqrt
 
 /**
  * Pure Kotlin pedal cadence estimator from 3-axis gyroscope samples (rad/s).
  * Designed for Samsung Galaxy Watch 4 mounted on the ankle, shoe, or crank arm.
+ *
+ * Uses a hybrid fusion of:
+ * 1. Mean angular velocity (accurate when strapped to crank arm or rotating smoothly)
+ * 2. Dominant-axis oscillation cycle timing (accurate when worn on a human ankle that
+ *    tilts back-and-forth once per pedal revolution rather than rotating a full 360 deg).
  */
 class CadenceEstimator {
-    private data class Sample(val omegaMag: Float, val timestampNs: Long)
+    private data class Sample(
+        val omegaMag: Float,
+        val dominantAxis: Float,
+        val timestampNs: Long
+    )
 
     private val samples = ArrayDeque<Sample>()
     private var smoothedRpm: Float = 0f
@@ -21,6 +32,8 @@ class CadenceEstimator {
         private const val MIN_ACTIVE_SAMPLES = 4
         private const val ANKLE_ARTICULATION_FACTOR = 0.85f
         private const val EMA_ALPHA = 0.25f
+        private const val MIN_CYCLE_NS = 375_000_000L // 375ms -> max 160 RPM
+        private const val MAX_CYCLE_NS = 1_700_000_000L // 1.7s -> min 35 RPM
     }
 
     @Synchronized
@@ -32,7 +45,12 @@ class CadenceEstimator {
         lastSampleNs = timestampNs
 
         val omega = sqrt(wx * wx + wy * wy + wz * wz)
-        samples.addLast(Sample(omega, timestampNs))
+        val dom = when {
+            abs(wz) >= abs(wx) && abs(wz) >= abs(wy) -> wz
+            abs(wx) >= abs(wy) -> wx
+            else -> wy
+        }
+        samples.addLast(Sample(omega, dom, timestampNs))
 
         val cutoffNs = timestampNs - WINDOW_NS
         while (samples.isNotEmpty() && samples.first().timestampNs < cutoffNs) {
@@ -67,9 +85,16 @@ class CadenceEstimator {
         }
 
         val meanOmega = totalSum / samples.size
-        val rawRpm = ((meanOmega * 60.0) / (2.0 * PI * ANKLE_ARTICULATION_FACTOR))
+        val omegaRpm = ((meanOmega * 60.0) / (2.0 * PI * ANKLE_ARTICULATION_FACTOR))
             .toFloat()
             .coerceIn(0f, 160f)
+
+        val cycleRpm = estimateCycleRpm()
+        val rawRpm = if (cycleRpm > 35f) {
+            max(omegaRpm, cycleRpm * 0.75f + omegaRpm * 0.25f).coerceIn(0f, 160f)
+        } else {
+            omegaRpm
+        }
 
         smoothedRpm = if (smoothedRpm < 1f) {
             rawRpm
@@ -77,6 +102,42 @@ class CadenceEstimator {
             EMA_ALPHA * rawRpm + (1f - EMA_ALPHA) * smoothedRpm
         }
         return smoothedRpm
+    }
+
+    private fun estimateCycleRpm(): Float {
+        if (samples.size < 8) return 0f
+        val list = samples.toList()
+
+        val crossingTimestamps = ArrayList<Long>()
+        var armedNegative = false
+        for (i in list.indices) {
+            val v = list[i].dominantAxis
+            if (v <= -0.25f) {
+                armedNegative = true
+            } else if (armedNegative && v >= 0.25f) {
+                armedNegative = false
+                val ts = list[i].timestampNs
+                if (crossingTimestamps.isEmpty() || ts - crossingTimestamps.last() >= MIN_CYCLE_NS) {
+                    crossingTimestamps.add(ts)
+                }
+            }
+        }
+        if (crossingTimestamps.size >= 2) {
+            var intervalSumNs = 0L
+            var validIntervals = 0
+            for (i in 1 until crossingTimestamps.size) {
+                val dtNs = crossingTimestamps[i] - crossingTimestamps[i - 1]
+                if (dtNs in MIN_CYCLE_NS..MAX_CYCLE_NS) {
+                    intervalSumNs += dtNs
+                    validIntervals++
+                }
+            }
+            if (validIntervals >= 1) {
+                val meanPeriodSec = (intervalSumNs.toDouble() / validIntervals) / 1_000_000_000.0
+                return (60.0 / meanPeriodSec).toFloat().coerceIn(35f, 160f)
+            }
+        }
+        return 0f
     }
 
     @Synchronized

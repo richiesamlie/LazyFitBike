@@ -144,12 +144,8 @@ class CyclingPhysics(
                 hrWatts to hrRpm
             }
         } else {
-            // ANKLE mode with automatic HR fallback when gyro RPM is 0
-            if (rpm >= 5f) {
-                computeRpmPower(rpm, safeGear)
-            } else {
-                computeHrPowerAndRpm(bpm)
-            }
+            // ANKLE mode: strictly pedal-cadence driven so stopping feet (0 RPM) coasts to a stop
+            computeRpmPower(rpm, safeGear)
         }
     }
 
