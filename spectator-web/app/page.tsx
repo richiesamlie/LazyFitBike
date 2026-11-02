@@ -27,13 +27,11 @@ interface Telemetry {
 }
 
 const ZONE_COLORS: Record<number, string> = {
-  1: "#71717A", // Gray - Recovery
-  2: "#38BDF8", // Cyan - Endurance
-  3: "#34D399", // Emerald - Tempo
-  4: "#FACC15", // Amber - Sweet Spot / Threshold
-  5: "#FB923C", // Orange - VO2 Max
-  6: "#F87171", // Rose - Anaerobic
-  7: "#C084FC"  // Purple - Neuromuscular
+  1: "#94A3B8", // Zone 1 Gray - Active Recovery
+  2: "#38BDF8", // Zone 2 Blue - Endurance
+  3: "#34D399", // Zone 3 Green - Tempo
+  4: "#F97316", // Zone 4 Orange - Threshold
+  5: "#F43F5E"  // Zone 5 Red - VO2 Max / Anaerobic
 };
 
 const ZONE_NAMES: Record<number, string> = {
@@ -41,9 +39,7 @@ const ZONE_NAMES: Record<number, string> = {
   2: "Z2 Endurance",
   3: "Z3 Tempo",
   4: "Z4 Threshold",
-  5: "Z5 VO2 Max",
-  6: "Z6 Anaerobic",
-  7: "Z7 Neuromuscular"
+  5: "Z5 VO2 Max"
 };
 
 export default function SpectatorPage() {

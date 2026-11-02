@@ -267,6 +267,13 @@ class GeminiCoachAndSheetsTest {
         // Invalid endpoint returns false safely without crashing
         val success = TelemetryBroadcaster.broadcast("", packet)
         assertEquals(false, success)
+
+        // Spectator cheer JSON parsing
+        val cheerJson = """{"cheers":[{"id":"cheer-999","message":"RIDE ON!","sender":"Coach","timestampMs":1730278805000}]}"""
+        val parsedCheer = TelemetryBroadcaster.parseLatestCheer(cheerJson)
+        assertNotNull(parsedCheer)
+        assertEquals("cheer-999", parsedCheer?.first)
+        assertEquals("📣 Coach: RIDE ON!", parsedCheer?.second)
     }
 
     @Test

@@ -30,36 +30,45 @@ class WearOtaListenerService : WearableListenerService() {
                 val intent = Intent(this, SensorWorkoutService::class.java).apply {
                     when {
                         cmd.equals("TOGGLE_MODE", ignoreCase = true) -> {
-                            action = SensorWorkoutService.ACTION_TOGGLE_MODE
+                            val next = if (SensorWorkoutService.state.value.mode == "ANKLE") "WRIST" else "ANKLE"
+                            SensorWorkoutService.updateConfigFromListener(this@WearOtaListenerService, mode = next)
+                            action = SensorWorkoutService.ACTION_SET_MODE
+                            putExtra(SensorWorkoutService.EXTRA_MODE, next)
                         }
                         cmd.startsWith("SET_MODE:", ignoreCase = true) -> {
+                            val next = cmd.substringAfter(":").trim().uppercase()
+                            SensorWorkoutService.updateConfigFromListener(this@WearOtaListenerService, mode = next)
                             action = SensorWorkoutService.ACTION_SET_MODE
-                            putExtra(
-                                SensorWorkoutService.EXTRA_MODE,
-                                cmd.substringAfter(":").trim().uppercase()
-                            )
+                            putExtra(SensorWorkoutService.EXTRA_MODE, next)
                         }
                         cmd.startsWith("SET_MAX_HR:", ignoreCase = true) -> {
+                            val maxHr = cmd.substringAfter(":").trim().toIntOrNull() ?: 190
+                            SensorWorkoutService.updateConfigFromListener(this@WearOtaListenerService, maxHr = maxHr)
                             action = SensorWorkoutService.ACTION_SET_MAX_HR
-                            putExtra(
-                                SensorWorkoutService.EXTRA_MAX_HR,
-                                cmd.substringAfter(":").trim().toIntOrNull() ?: 190
-                            )
+                            putExtra(SensorWorkoutService.EXTRA_MAX_HR, maxHr)
                         }
                         cmd.startsWith("WORKOUT_STEP:", ignoreCase = true) -> {
-                            action = SensorWorkoutService.ACTION_SET_WORKOUT_STEP
-                            putExtra(
-                                SensorWorkoutService.EXTRA_WORKOUT_PAYLOAD,
-                                cmd.substringAfter(":")
+                            val payload = cmd.substringAfter(":")
+                            SensorWorkoutService.updateConfigFromListener(
+                                this@WearOtaListenerService,
+                                workoutPayload = payload
                             )
+                            action = SensorWorkoutService.ACTION_SET_WORKOUT_STEP
+                            putExtra(SensorWorkoutService.EXTRA_WORKOUT_PAYLOAD, payload)
                         }
                         cmd.equals("END_WORKOUT", ignoreCase = true) -> {
+                            SensorWorkoutService.updateConfigFromListener(
+                                this@WearOtaListenerService,
+                                clearWorkout = true
+                            )
                             action = SensorWorkoutService.ACTION_CLEAR_WORKOUT
                         }
                         else -> return
                     }
                 }
-                runCatching { startService(intent) }
+                if (SensorWorkoutService.state.value.isActive) {
+                    runCatching { startService(intent) }
+                }
             }
         }
     }

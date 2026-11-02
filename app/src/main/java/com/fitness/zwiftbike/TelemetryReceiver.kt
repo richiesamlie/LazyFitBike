@@ -28,7 +28,8 @@ data class WatchTelemetryPacket(
  */
 class TelemetryReceiver(
     context: Context,
-    private val onPacket: (WatchTelemetryPacket) -> Unit
+    private val onPacket: (WatchTelemetryPacket) -> Unit,
+    private val onControl: (String) -> Unit = {}
 ) : MessageClient.OnMessageReceivedListener {
 
     private val appContext = context.applicationContext
@@ -39,16 +40,26 @@ class TelemetryReceiver(
     companion object {
         const val TELEMETRY_PATH = "/lazyfitbike/telemetry"
         const val LEGACY_TELEMETRY_PATH = "/velopulse/telemetry"
+        const val CONTROL_PATH = "/lazyfitbike/control"
+        const val LEGACY_CONTROL_PATH = "/velopulse/control"
         const val UDP_PORT = 45454
 
         fun parsePayload(raw: String): WatchTelemetryPacket? {
             val parts = raw.trim().split("|")
-            if (parts.size < 5 || parts[0] != "v1") return null
+            if (parts.size < 5 || parts[0] != "v1" || parts[1] == "CTRL") return null
             val mode = parts[1].uppercase()
             val rpm = parts[2].toFloatOrNull() ?: return null
             val bpm = parts[3].toIntOrNull() ?: return null
             val ts = parts[4].toLongOrNull() ?: System.currentTimeMillis()
             return WatchTelemetryPacket(mode = mode, rpm = rpm, bpm = bpm, timestampMs = ts)
+        }
+
+        fun parseControlPayload(raw: String): String? {
+            val trimmed = raw.trim()
+            if (trimmed.startsWith("v1|CTRL|")) {
+                return trimmed.removePrefix("v1|CTRL|").trim().takeIf { it.isNotEmpty() }
+            }
+            return null
         }
     }
 
@@ -67,7 +78,12 @@ class TelemetryReceiver(
                     val packet = DatagramPacket(buffer, buffer.size)
                     socket.receive(packet)
                     val text = String(packet.data, 0, packet.length, Charsets.UTF_8)
-                    parsePayload(text)?.let(onPacket)
+                    val ctrl = parseControlPayload(text)
+                    if (ctrl != null) {
+                        onControl(ctrl)
+                    } else {
+                        parsePayload(text)?.let(onPacket)
+                    }
                 }
             }
         }
@@ -77,6 +93,11 @@ class TelemetryReceiver(
         if (event.path == TELEMETRY_PATH || event.path == LEGACY_TELEMETRY_PATH) {
             val text = String(event.data, Charsets.UTF_8)
             parsePayload(text)?.let(onPacket)
+        } else if (event.path == CONTROL_PATH || event.path == LEGACY_CONTROL_PATH) {
+            val cmd = String(event.data, Charsets.UTF_8).trim()
+            if (cmd.isNotEmpty()) {
+                onControl(cmd)
+            }
         }
     }
 

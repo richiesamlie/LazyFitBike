@@ -87,6 +87,57 @@ class SensorWorkoutService : Service(), SensorEventListener {
 
         private val _state = MutableStateFlow(WatchWorkoutState())
         val state: StateFlow<WatchWorkoutState> = _state.asStateFlow()
+
+        fun updateConfigFromListener(
+            context: Context,
+            mode: String? = null,
+            maxHr: Int? = null,
+            workoutPayload: String? = null,
+            clearWorkout: Boolean = false
+        ) {
+            if (maxHr != null) {
+                val safeMaxHr = maxHr.coerceIn(130, 230)
+                context.getSharedPreferences("lazyfitbike_watch_prefs", Context.MODE_PRIVATE)
+                    .edit()
+                    .putInt("maxHr", safeMaxHr)
+                    .apply()
+                _state.value = _state.value.copy(maxHr = safeMaxHr)
+            }
+            if (mode != null && (mode == "ANKLE" || mode == "WRIST")) {
+                _state.value = _state.value.copy(
+                    mode = mode,
+                    rpm = if (mode == "WRIST" && !_state.value.isSimulated) 0f else _state.value.rpm
+                )
+            }
+            if (workoutPayload != null) {
+                val parts = workoutPayload.split("|")
+                if (parts.size >= 4) {
+                    val watts = parts[0].toIntOrNull() ?: 0
+                    val rpm = parts[1].toIntOrNull() ?: 0
+                    val remainingSec = parts[2].toIntOrNull() ?: 0
+                    val zone = parts[3].toIntOrNull() ?: 1
+                    val title = if (parts.size >= 5) parts[4] else ""
+                    _state.value = _state.value.copy(
+                        isWorkoutActive = true,
+                        targetWatts = watts,
+                        targetRpm = rpm,
+                        stepRemainingSec = remainingSec,
+                        workoutZone = zone,
+                        stepTitle = title
+                    )
+                }
+            }
+            if (clearWorkout) {
+                _state.value = _state.value.copy(
+                    isWorkoutActive = false,
+                    targetWatts = 0,
+                    targetRpm = 0,
+                    stepRemainingSec = 0,
+                    workoutZone = 1,
+                    stepTitle = ""
+                )
+            }
+        }
     }
 
     override fun onCreate() {
@@ -220,14 +271,20 @@ class SensorWorkoutService : Service(), SensorEventListener {
             mode = nextMode,
             rpm = if (nextMode == "WRIST" && !_state.value.isSimulated) 0f else _state.value.rpm
         )
-        // Immediately broadcast mode sync packet over Bluetooth & UDP even when workout is not active
+        if (_state.value.isActive) {
+            registerSensors()
+        }
         serviceScope.launch {
-            telemetrySender.sendTelemetry(
-                mode = nextMode,
-                rpm = _state.value.rpm,
-                bpm = _state.value.bpm,
-                timestampMs = System.currentTimeMillis()
-            )
+            if (_state.value.isActive) {
+                telemetrySender.sendTelemetry(
+                    mode = nextMode,
+                    rpm = _state.value.rpm,
+                    bpm = _state.value.bpm,
+                    timestampMs = System.currentTimeMillis()
+                )
+            } else {
+                telemetrySender.sendControlMessage("MODE_SYNC:$nextMode")
+            }
         }
     }
 
@@ -306,27 +363,36 @@ class SensorWorkoutService : Service(), SensorEventListener {
     }
 
     private fun stopWorkout() {
+        val wasActive = _state.value.isActive
         transmitJob?.cancel()
         unregisterSensors()
         releaseWakeLock()
         cadenceEstimator.reset()
         _state.value = _state.value.copy(isActive = false, rpm = 0f, hrStatus = "IDLE")
-        runCatching {
-            stopForeground(STOP_FOREGROUND_REMOVE)
+        if (wasActive) {
+            serviceScope.launch {
+                telemetrySender.sendControlMessage("WATCH_STOPPED")
+                runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+                stopSelf()
+            }
+        } else {
+            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+            stopSelf()
         }
-        stopSelf()
     }
 
     private fun registerSensors() {
         sensorManager.unregisterListener(this)
-        val gyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
-        if (gyro != null) {
-            sensorManager.registerListener(this, gyro, SensorManager.SENSOR_DELAY_GAME)
-        } else {
-            val accel = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
-                ?: sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-            if (accel != null) {
-                sensorManager.registerListener(this, accel, SensorManager.SENSOR_DELAY_GAME)
+        if (_state.value.mode == "ANKLE") {
+            val gyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+            if (gyro != null) {
+                sensorManager.registerListener(this, gyro, SensorManager.SENSOR_DELAY_GAME)
+            } else {
+                val accel = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+                    ?: sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+                if (accel != null) {
+                    sensorManager.registerListener(this, accel, SensorManager.SENSOR_DELAY_GAME)
+                }
             }
         }
         hrTrackerManager.start()

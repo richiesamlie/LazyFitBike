@@ -10,6 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -53,6 +54,7 @@ data class RideUiState(
     val activeRouteId: String = "alpe_dhuez",
     val activeRouteName: String = "Alpe d'Huez Climb",
     val activeRouteRegion: String = "French Alps, FR",
+    val activeRouteDistanceMeters: Float = 4000f,
     val activeRoutePolylineJson: String = "[]",
     val activeRouteWaypoints: List<GpsWaypoint> = emptyList(),
     val currentLat: Double = 45.0592,
@@ -129,6 +131,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             activeRouteId = activeRoute.id,
             activeRouteName = activeRoute.name,
             activeRouteRegion = activeRoute.region,
+            activeRouteDistanceMeters = activeRoute.totalDistanceMeters,
             activeRoutePolylineJson = activeRoute.toCompactJsonArray(),
             activeRouteWaypoints = activeRoute.waypoints,
             currentLat = activeRoute.waypoints.first().lat,
@@ -149,6 +152,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     private var watchBpm: Int = 0
 
     private var elapsedAccumulatorSec: Float = 0f
+    private var workoutAccumulatorSec: Float = 0f
+    private var lastWorkoutTickSec: Int = -1
 
     private val bots = listOf(
         PacerBot("Bot A", 1.8f, 7.2f, 40f),
@@ -158,18 +163,51 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         PacerBot("Bot E", 3.6f, 10.9f, 310f)
     )
 
-    private val receiver = TelemetryReceiver(application) { packet ->
-        lastWatchPacketTimeMs = System.currentTimeMillis()
-        watchRpm = packet.rpm
-        watchBpm = packet.bpm
-        val current = _uiState.value
-        if (current.connectionState != ConnectionState.DEMO_MODE) {
-            _uiState.value = current.copy(
-                connectionState = ConnectionState.LIVE_WATCH,
-                sensorMode = packet.mode
-            )
+    private val receiver = TelemetryReceiver(
+        context = application,
+        onPacket = { packet ->
+            lastWatchPacketTimeMs = System.currentTimeMillis()
+            watchRpm = packet.rpm
+            watchBpm = packet.bpm
+            _uiState.update { current ->
+                if (current.connectionState != ConnectionState.DEMO_MODE) {
+                    current.copy(
+                        connectionState = ConnectionState.LIVE_WATCH,
+                        sensorMode = packet.mode
+                    )
+                } else {
+                    current
+                }
+            }
+        },
+        onControl = { command ->
+            when {
+                command.startsWith("MODE_SYNC:") -> {
+                    val mode = command.removePrefix("MODE_SYNC:").trim().uppercase()
+                    if (mode == "ANKLE" || mode == "WRIST") {
+                        _uiState.update { it.copy(sensorMode = mode) }
+                    }
+                }
+                command == "WATCH_STOPPED" -> {
+                    watchRpm = 0f
+                    watchBpm = 0
+                    lastWatchPacketTimeMs = 0L
+                    _uiState.update { current ->
+                        if (current.connectionState != ConnectionState.DEMO_MODE) {
+                            current.copy(
+                                connectionState = ConnectionState.WAITING_FOR_WATCH,
+                                watts = 0,
+                                rpm = 0,
+                                bpm = 0
+                            )
+                        } else {
+                            current
+                        }
+                    }
+                }
+            }
         }
-    }
+    )
 
     private fun resolveInstalledVersion(app: Application): String {
         return runCatching {
@@ -298,14 +336,14 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                 val gpsAfterStep = GpsRouteEngine.interpolateAtDistance(activeRoute, stepResult.distanceMeters)
 
                 var didTickWholeSec = false
+                val wInt = stepResult.watts.roundToInt()
+                val rInt = stepResult.effectiveRpm.roundToInt()
                 if (stepResult.speedKmh > 0.1f || stepResult.watts > 0.5f) {
                     elapsedAccumulatorSec += dt
                     val wholeSec = elapsedAccumulatorSec.toInt()
                     if (wholeSec > lastRecordedElapsedSec) {
                         lastRecordedElapsedSec = wholeSec
                         didTickWholeSec = true
-                        val wInt = stepResult.watts.roundToInt()
-                        val rInt = stepResult.effectiveRpm.roundToInt()
                         recordedPoints.add(
                             RecordedTrackPoint(
                                 lat = gpsAfterStep.lat,
@@ -320,7 +358,16 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                         wattsSum += wInt
                         bpmSum += inputBpm
                         rpmSum += rInt
+                    }
+                }
 
+                val activeWp = _workoutProgress.value
+                if (activeWp != null && !activeWp.isPaused && !activeWp.isCompleted) {
+                    workoutAccumulatorSec += dt
+                    val workoutSec = workoutAccumulatorSec.toInt()
+                    if (workoutSec > lastWorkoutTickSec) {
+                        lastWorkoutTickSec = workoutSec
+                        didTickWholeSec = true
                         tickWorkoutSecond(wInt, rInt, inputBpm)
                     }
                 }
@@ -381,48 +428,63 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                         workoutTargetWatts = wTargetWatts,
                         workoutRemainingSec = wRemaining
                     )
-                    TelemetryBroadcaster.broadcastAsync(viewModelScope, _uiState.value.spectatorEndpointUrl, packet)
+                    TelemetryBroadcaster.broadcastAsync(
+                        scope = viewModelScope,
+                        spectatorEndpoint = _uiState.value.spectatorEndpointUrl,
+                        packet = packet,
+                        onCheerReceived = { cheerMsg ->
+                            tonePlayer.playStepTransitionChime()
+                            _uiState.update { it.copy(statusBannerMessage = cheerMsg) }
+                        }
+                    )
                 }
 
-                _uiState.value = current.copy(
-                    connectionState = nextConnState,
-                    watts = wRounded,
-                    wattsPerKg = stepResult.wattsPerKg,
-                    rpm = stepResult.effectiveRpm.roundToInt(),
-                    bpm = inputBpm,
-                    powerZone = pZone,
-                    hrZone = hZone,
-                    speedKmh = stepResult.speedKmh,
-                    distanceKm = stepResult.distanceMeters / 1000f,
-                    distanceMeters = stepResult.distanceMeters,
-                    elapsedSeconds = elapsedAccumulatorSec.toInt(),
-                    caloriesKcal = stepResult.caloriesKcal.roundToInt(),
-                    slopeGradePercent = stepResult.slopeGradePercent,
-                    elevationMeters = stepResult.elevationMeters,
-                    isDrafting = draftingNow,
-                    nearestBotLabel = botLabel,
-                    currentLat = gpsAfterStep.lat,
-                    currentLon = gpsAfterStep.lon,
-                    currentEleMeters = gpsAfterStep.ele,
-                    currentCurvature = gpsAfterStep.curvatureNormalized,
-                    recordedTrackPointsCount = count,
-                    avgWatts = avgW,
-                    avgBpm = avgB,
-                    avgRpm = avgR,
-                    isWorkoutActive = isWorkoutActive,
-                    workoutName = wName,
-                    workoutTargetWatts = wTargetWatts,
-                    workoutTargetRpm = wTargetRpm,
-                    workoutStepRemainingSec = wRemaining,
-                    workoutStepIndex = wStepIdx,
-                    workoutTotalSteps = wTotalSteps,
-                    workoutStepName = wStepName,
-                    workoutCompliancePercent = wComp,
-                    workoutEarnedStars = wStars,
-                    workoutPacingPrompt = wPrompt,
-                    workoutIntensityBiasPercent = wBias,
-                    isWorkoutPaused = wPaused
-                )
+                _uiState.update { latest ->
+                    val resolvedConn = if (latest.connectionState == current.connectionState) {
+                        nextConnState
+                    } else {
+                        latest.connectionState
+                    }
+                    latest.copy(
+                        connectionState = resolvedConn,
+                        watts = wRounded,
+                        wattsPerKg = stepResult.wattsPerKg,
+                        rpm = stepResult.effectiveRpm.roundToInt(),
+                        bpm = inputBpm,
+                        powerZone = pZone,
+                        hrZone = hZone,
+                        speedKmh = stepResult.speedKmh,
+                        distanceKm = stepResult.distanceMeters / 1000f,
+                        distanceMeters = stepResult.distanceMeters,
+                        elapsedSeconds = elapsedAccumulatorSec.toInt(),
+                        caloriesKcal = stepResult.caloriesKcal.roundToInt(),
+                        slopeGradePercent = stepResult.slopeGradePercent,
+                        elevationMeters = stepResult.elevationMeters,
+                        isDrafting = draftingNow,
+                        nearestBotLabel = botLabel,
+                        currentLat = gpsAfterStep.lat,
+                        currentLon = gpsAfterStep.lon,
+                        currentEleMeters = gpsAfterStep.ele,
+                        currentCurvature = gpsAfterStep.curvatureNormalized,
+                        recordedTrackPointsCount = count,
+                        avgWatts = avgW,
+                        avgBpm = avgB,
+                        avgRpm = avgR,
+                        isWorkoutActive = isWorkoutActive,
+                        workoutName = wName,
+                        workoutTargetWatts = wTargetWatts,
+                        workoutTargetRpm = wTargetRpm,
+                        workoutStepRemainingSec = wRemaining,
+                        workoutStepIndex = wStepIdx,
+                        workoutTotalSteps = wTotalSteps,
+                        workoutStepName = wStepName,
+                        workoutCompliancePercent = wComp,
+                        workoutEarnedStars = wStars,
+                        workoutPacingPrompt = wPrompt,
+                        workoutIntensityBiasPercent = wBias,
+                        isWorkoutPaused = wPaused
+                    )
+                }
 
                 delay(50L)
             }
@@ -483,18 +545,21 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         bpmSum = 0L
         rpmSum = 0L
         val firstWp = route.waypoints.first()
-        _uiState.value = _uiState.value.copy(
-            activeRouteId = route.id,
-            activeRouteName = route.name,
-            activeRouteRegion = route.region,
-            activeRoutePolylineJson = route.toCompactJsonArray(),
-            activeRouteWaypoints = route.waypoints,
-            currentLat = firstWp.lat,
-            currentLon = firstWp.lon,
-            currentEleMeters = firstWp.ele,
-            recordedTrackPointsCount = 0,
-            statusBannerMessage = statusMsg
-        )
+        _uiState.update {
+            it.copy(
+                activeRouteId = route.id,
+                activeRouteName = route.name,
+                activeRouteRegion = route.region,
+                activeRouteDistanceMeters = route.totalDistanceMeters,
+                activeRoutePolylineJson = route.toCompactJsonArray(),
+                activeRouteWaypoints = route.waypoints,
+                currentLat = firstWp.lat,
+                currentLon = firstWp.lon,
+                currentEleMeters = firstWp.ele,
+                recordedTrackPointsCount = 0,
+                statusBannerMessage = statusMsg
+            )
+        }
     }
 
     fun setMapModalOpen(open: Boolean) {
@@ -970,7 +1035,13 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         // Step completion or Ramp exhaustion
         if (nextStepElapsed >= currentStep.durationSeconds || rampExhaustionTriggered) {
             val stepAvgWatts = if (currentStepWattsSamples.isNotEmpty()) currentStepWattsSamples.average().toInt() else wInt
-            val stepFinalComp = WorkoutEngine.evaluateStepCompliance(stepAvgWatts, stepTargetWatts)
+            val meanStepBaseFrac = if (currentStep.targetPowerFractionHigh != null) {
+                (currentStep.targetPowerFraction + currentStep.targetPowerFractionHigh) * 0.5f
+            } else {
+                currentStep.targetPowerFraction
+            }
+            val meanStepTargetWatts = (meanStepBaseFrac * (1f + wp.intensityBiasPercent / 100f) * physics.ftpWatts).roundToInt()
+            val stepFinalComp = WorkoutEngine.evaluateStepCompliance(stepAvgWatts, meanStepTargetWatts)
             val starsEarned = WorkoutEngine.starsForCompliance(stepFinalComp)
             val updatedStars = wp.earnedStars + starsEarned
             currentStepWattsSamples.clear()
@@ -1006,7 +1077,14 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                 )
             } else {
                 // Workout Finished!
-                finishWorkout(wp.copy(earnedStars = updatedStars, totalElapsedSeconds = nextTotalElapsed))
+                val attemptedMaxStars = ((wp.currentStepIndex + 1) * 3).coerceAtLeast(3)
+                finishWorkout(
+                    wp.copy(
+                        earnedStars = updatedStars,
+                        maxStarsPossible = attemptedMaxStars,
+                        totalElapsedSeconds = nextTotalElapsed
+                    )
+                )
             }
         } else {
             // Normal 1-second progression
@@ -1054,7 +1132,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
 
         val avgWatts = if (wattsList.isNotEmpty()) wattsList.average().toInt() else 0
         val maxWatts = wattsList.maxOrNull() ?: 0
-        val maxStars = workout.steps.size * 3
+        val maxStars = finalProgress.maxStarsPossible.coerceAtLeast(3)
         val complianceAvg = if (maxStars > 0) {
             (finalProgress.earnedStars.toFloat() / maxStars.toFloat()) * 100f
         } else {
@@ -1087,12 +1165,15 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
 
         val debrief = GeminiCoachEngine.generatePostRideDebrief(summary, _uiState.value.riderWeightKg)
 
-        _uiState.value = _uiState.value.copy(
-            isWorkoutActive = false,
-            isWorkoutSummaryModalOpen = true,
-            statusBannerMessage = "Workout Complete! ${summary.workoutName}: TSS $tss, NP ${np}W",
-            aiCoachDebrief = debrief
-        )
+        _uiState.update {
+            it.copy(
+                isWorkoutActive = false,
+                isWorkoutPaused = false,
+                isWorkoutSummaryModalOpen = true,
+                statusBannerMessage = "Workout Complete! ${summary.workoutName}: TSS $tss, NP ${np}W",
+                aiCoachDebrief = debrief
+            )
+        }
     }
 
     private fun sendWorkoutStepToWatch(watts: Int, rpm: Int, remainingSec: Int, zone: Int, title: String) {
@@ -1129,6 +1210,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         workoutWattsHistory.clear()
         currentStepWattsSamples.clear()
         rampFailureSecondsCount = 0
+        workoutAccumulatorSec = 0f
+        lastWorkoutTickSec = -1
 
         val firstStep = workout.steps.firstOrNull()
         val targetW = if (firstStep != null) {
@@ -1233,7 +1316,13 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         val nextBias = (wp.intensityBiasPercent + deltaPercent).coerceIn(-50, 50)
         val currentStep = wp.currentStep
         val targetW = if (currentStep != null) {
-            val biasedFrac = currentStep.targetPowerFraction * (1f + nextBias / 100f)
+            val baseFrac = if (currentStep.targetPowerFractionHigh != null && currentStep.durationSeconds > 0) {
+                val progressRatio = wp.stepElapsedSeconds.toFloat() / currentStep.durationSeconds.toFloat()
+                currentStep.targetPowerFraction + (currentStep.targetPowerFractionHigh - currentStep.targetPowerFraction) * progressRatio
+            } else {
+                currentStep.targetPowerFraction
+            }
+            val biasedFrac = baseFrac * (1f + nextBias / 100f)
             (biasedFrac * physics.ftpWatts).roundToInt()
         } else {
             wp.targetWatts
@@ -1242,33 +1331,53 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             intensityBiasPercent = nextBias,
             targetWatts = targetW
         )
-        _uiState.value = _uiState.value.copy(
-            workoutIntensityBiasPercent = nextBias,
-            workoutTargetWatts = targetW
-        )
+        _uiState.update {
+            it.copy(
+                workoutIntensityBiasPercent = nextBias,
+                workoutTargetWatts = targetW
+            )
+        }
+        if (currentStep != null) {
+            sendWorkoutStepToWatch(
+                watts = targetW,
+                rpm = currentStep.targetCadenceRpm ?: 90,
+                remainingSec = wp.stepRemainingSeconds,
+                zone = currentStep.zone,
+                title = currentStep.name
+            )
+        }
     }
 
     fun stopWorkout() {
+        val wp = _workoutProgress.value
+        if (wp != null && !wp.isCompleted && workoutWattsHistory.isNotEmpty()) {
+            val completedStepsStars = (wp.currentStepIndex * 3).coerceAtLeast(3)
+            finishWorkout(wp.copy(maxStarsPossible = completedStepsStars))
+            return
+        }
+
         _workoutProgress.value = null
         currentStepWattsSamples.clear()
         workoutWattsHistory.clear()
         rampFailureSecondsCount = 0
 
-        _uiState.value = _uiState.value.copy(
-            isWorkoutActive = false,
-            isWorkoutPaused = false,
-            workoutName = "",
-            workoutTargetWatts = 0,
-            workoutTargetRpm = 0,
-            workoutStepRemainingSec = 0,
-            workoutStepIndex = 0,
-            workoutTotalSteps = 0,
-            workoutStepName = "",
-            workoutCompliancePercent = 100f,
-            workoutEarnedStars = 0,
-            workoutPacingPrompt = "",
-            workoutIntensityBiasPercent = 0
-        )
+        _uiState.update {
+            it.copy(
+                isWorkoutActive = false,
+                isWorkoutPaused = false,
+                workoutName = "",
+                workoutTargetWatts = 0,
+                workoutTargetRpm = 0,
+                workoutStepRemainingSec = 0,
+                workoutStepIndex = 0,
+                workoutTotalSteps = 0,
+                workoutStepName = "",
+                workoutCompliancePercent = 100f,
+                workoutEarnedStars = 0,
+                workoutPacingPrompt = "",
+                workoutIntensityBiasPercent = 0
+            )
+        }
         sendControlMessageToWatch("END_WORKOUT")
     }
 
@@ -1301,8 +1410,40 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    private fun resolveOrSynthesizeSummary(): WorkoutSummary {
+        _workoutSummary.value?.let { return it }
+        val points = ensureNonEmptyTrackPoints()
+        val wattsList = points.map { it.watts }
+        val ftp = physics.ftpWatts.toInt()
+        val np = WorkoutEngine.computeNormalizedPower(wattsList)
+        val ifVal = WorkoutEngine.computeIntensityFactor(np, ftp)
+        val totalSec = _uiState.value.elapsedSeconds.coerceAtLeast(points.size)
+        val tss = WorkoutEngine.computeTss(totalSec, np, ifVal, ftp)
+        val zoneTimes = mutableMapOf<Int, Int>()
+        for (w in wattsList) {
+            val z = CyclingPhysics.computePowerZone(w, physics.ftpWatts)
+            zoneTimes[z] = (zoneTimes[z] ?: 0) + 1
+        }
+        return WorkoutSummary(
+            workoutName = "Free Ride - ${activeRoute.name}",
+            category = WorkoutType.CUSTOM,
+            totalTimeSeconds = totalSec,
+            avgWatts = if (wattsList.isNotEmpty()) wattsList.average().toInt() else 0,
+            maxWatts = wattsList.maxOrNull() ?: 0,
+            normalizedPowerWatts = np,
+            intensityFactor = ifVal,
+            tss = tss,
+            timeInZones = zoneTimes,
+            overallCompliancePercent = 100f,
+            totalStarsEarned = 3,
+            maxStarsPossible = 3,
+            detectedFtpWatts = null,
+            previousFtpWatts = ftp
+        )
+    }
+
     fun exportAndShareGoogleSheets(context: Context) {
-        val summary = _workoutSummary.value ?: return
+        val summary = resolveOrSynthesizeSummary()
         val file = GoogleSheetsSyncManager.exportAndShareGoogleSheetsCsv(
             context = context,
             summary = summary,
@@ -1314,14 +1455,14 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             avgBpm = _uiState.value.avgBpm
         )
         if (file != null) {
-            _uiState.value = _uiState.value.copy(
-                statusBannerMessage = "Exported telemetry CSV to Google Sheets"
-            )
+            _uiState.update {
+                it.copy(statusBannerMessage = "Exported telemetry CSV + copied TSV row to clipboard")
+            }
         }
     }
 
     fun exportAndShareCanvaStory(context: Context) {
-        val summary = _workoutSummary.value ?: return
+        val summary = resolveOrSynthesizeSummary()
         val file = CanvaShareCardGenerator.generateAndShareStoryCard(
             context = context,
             summary = summary,
@@ -1335,9 +1476,9 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             elevationWaypoints = activeRoute.waypoints
         )
         if (file != null) {
-            _uiState.value = _uiState.value.copy(
-                statusBannerMessage = "Created 1080x1920 Story Card & opened share sheet"
-            )
+            _uiState.update {
+                it.copy(statusBannerMessage = "Created 1080x1920 Story Card & opened share sheet")
+            }
         }
     }
 

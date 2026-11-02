@@ -84,6 +84,11 @@ class CyclingPhysicsTest {
         assertEquals("ANKLE", parsed?.mode)
         assertEquals(88.5f, parsed?.rpm ?: 0f, 0.01f)
         assertEquals(146, parsed?.bpm)
+
+        assertEquals(null, TelemetryReceiver.parsePayload("v1|CTRL|MODE_SYNC:WRIST"))
+        assertEquals("MODE_SYNC:WRIST", TelemetryReceiver.parseControlPayload("v1|CTRL|MODE_SYNC:WRIST"))
+        assertEquals("WATCH_STOPPED", TelemetryReceiver.parseControlPayload("v1|CTRL|WATCH_STOPPED"))
+        assertEquals(null, TelemetryReceiver.parseControlPayload("v1|ANKLE|88.5|146|1730100000123"))
     }
 
     @Test

@@ -108,6 +108,9 @@
       hrZone: 1,
       elapsedSeconds: 0,
       activeRouteName: "Alpe d'Huez Climb",
+      isDrafting: false,
+      nearestBotLabel: 'Bot C (2.5 W/kg) +12m',
+      routeTotalMeters: 4000,
       wheelRotationRad: 0,
       // Structured Workout State
       isWorkoutActive: false,
@@ -163,6 +166,9 @@
         const parsed = typeof jsonArrayStr === 'string' ? JSON.parse(jsonArrayStr) : jsonArrayStr;
         if (Array.isArray(parsed) && parsed.length >= 2) {
           routeWaypoints = parsed;
+          if (mapHintEl) {
+            mapHintEl.textContent = 'OpenStreetMap Live View: Tap any 2 points on the map to build an OSRM road route.';
+          }
         }
       } catch (e) {}
     };
@@ -170,7 +176,8 @@
     window.updateRideState = function(
       speedKmh, rpm, watts, gradePercent, distanceMeters,
       cameraMode, lat, lon, curvature, isMapModalOpen,
-      bpm, wattsPerKg, ftpWatts, powerZone, hrZone, elapsedSeconds, activeRouteName
+      bpm, wattsPerKg, ftpWatts, powerZone, hrZone, elapsedSeconds, activeRouteName,
+      isDrafting, nearestBotLabel, routeTotalMeters
     ) {
       state.speedKmh = Number(speedKmh) || 0;
       state.rpm = Number(rpm) || 0;
@@ -189,6 +196,9 @@
       if (hrZone !== undefined && Number(hrZone) >= 1) state.hrZone = Math.min(5, Math.max(1, Math.round(Number(hrZone))));
       if (elapsedSeconds !== undefined) state.elapsedSeconds = Math.max(0, Math.round(Number(elapsedSeconds) || 0));
       if (activeRouteName) state.activeRouteName = String(activeRouteName);
+      if (isDrafting !== undefined) state.isDrafting = Boolean(isDrafting);
+      if (nearestBotLabel) state.nearestBotLabel = String(nearestBotLabel);
+      if (routeTotalMeters !== undefined && Number(routeTotalMeters) >= 100) state.routeTotalMeters = Number(routeTotalMeters);
 
       const shouldShowMap = Boolean(isMapModalOpen);
       if (shouldShowMap !== state.isMapModalOpen) {
@@ -1236,29 +1246,34 @@
         }
         hudCtx.restore();
       } else {
-        const pillW = 430;
-        const pillH = 44;
+        const pillW = 480;
+        const pillH = 54;
         const pillX = cx - pillW / 2;
-        const pillY = 56;
-        drawGlassPanel(hudCtx, pillX, pillY, pillW, pillH, 22, 'rgba(255, 255, 255, 0.16)', 0.82);
+        const pillY = 54;
+        const pillBorder = state.isDrafting ? '#34D399' : 'rgba(255, 255, 255, 0.16)';
+        drawGlassPanel(hudCtx, pillX, pillY, pillW, pillH, 27, pillBorder, 0.82);
 
         // Live GPS Pulsing Dot
         hudCtx.save();
         hudCtx.fillStyle = '#34D399';
         hudCtx.beginPath();
-        hudCtx.arc(pillX + 28, pillY + 22, 5, 0, Math.PI * 2);
+        hudCtx.arc(pillX + 28, pillY + 21, 5, 0, Math.PI * 2);
         hudCtx.fill();
 
         hudCtx.textAlign = 'left';
         hudCtx.fillStyle = '#F4F4F5';
         hudCtx.font = 'bold 13px sans-serif';
-        hudCtx.fillText(state.activeRouteName.toUpperCase(), pillX + 44, pillY + 26);
+        hudCtx.fillText(state.activeRouteName.toUpperCase(), pillX + 44, pillY + 25);
+
+        hudCtx.fillStyle = state.isDrafting ? '#34D399' : '#A1A1AA';
+        hudCtx.font = 'bold 11px sans-serif';
+        hudCtx.fillText(state.nearestBotLabel, pillX + 44, pillY + 42);
 
         hudCtx.textAlign = 'right';
         hudCtx.fillStyle = gradeColor;
-        hudCtx.font = '900 13px sans-serif';
+        hudCtx.font = '900 14px sans-serif';
         const gSign = state.gradePercent >= 0 ? '+' : '';
-        hudCtx.fillText(gSign + state.gradePercent.toFixed(1) + '%', pillX + pillW - 24, pillY + 26);
+        hudCtx.fillText(gSign + state.gradePercent.toFixed(1) + '%', pillX + pillW - 24, pillY + 32);
         hudCtx.restore();
       }
 
@@ -1423,30 +1438,55 @@
       const gradeSign = state.gradePercent >= 0 ? '+' : '';
       hudCtx.fillText(gradeSign + state.gradePercent.toFixed(1) + '%', rightCapsuleX + 195, rightCapsuleY + 78);
 
-      // Mini Elevation Profile Ribbon
+      // Mini Elevation Profile Ribbon (Dynamic from active routeWaypoints)
       const pX = rightCapsuleX + 195;
       const pY = rightCapsuleY + 138;
       const profW = 125;
+      const profH = 34;
 
       hudCtx.fillStyle = 'rgba(39, 39, 42, 0.65)';
       hudCtx.roundRect ? hudCtx.roundRect(pX, rightCapsuleY + 95, profW, 46, 6) : hudCtx.rect(pX, rightCapsuleY + 95, profW, 46);
       hudCtx.fill();
 
+      const wps = (Array.isArray(routeWaypoints) && routeWaypoints.length >= 2)
+        ? routeWaypoints
+        : [[0,0,724],[0,0,860],[0,0,1118],[0,0,1420],[0,0,1815]];
+      let minEle = Infinity;
+      let maxEle = -Infinity;
+      for (let i = 0; i < wps.length; i++) {
+        const ele = Number(wps[i][2]) || 0;
+        if (ele < minEle) minEle = ele;
+        if (ele > maxEle) maxEle = ele;
+      }
+      const eleSpan = Math.max(15, maxEle - minEle);
+
       hudCtx.strokeStyle = '#F97316';
       hudCtx.lineWidth = 2;
       hudCtx.beginPath();
-      hudCtx.moveTo(pX, pY - 6);
-      hudCtx.lineTo(pX + 25, pY - 14);
-      hudCtx.lineTo(pX + 55, pY - 32);
-      hudCtx.lineTo(pX + 85, pY - 20);
-      hudCtx.lineTo(pX + profW, pY - 34);
+      for (let i = 0; i < wps.length; i++) {
+        const xFrac = i / (wps.length - 1);
+        const yFrac = ((Number(wps[i][2]) || 0) - minEle) / eleSpan;
+        const wx = pX + xFrac * profW;
+        const wy = (pY - 4) - yFrac * profH;
+        if (i === 0) hudCtx.moveTo(wx, wy);
+        else hudCtx.lineTo(wx, wy);
+      }
       hudCtx.stroke();
 
       // Rider dot on elevation profile
-      const profDotX = pX + ((state.distanceMeters % 4000) / 4000) * profW;
+      const routeTot = Math.max(100, state.routeTotalMeters || 4000);
+      const progFrac = Math.min(1.0, Math.max(0.0, (state.distanceMeters % routeTot) / routeTot));
+      const profDotX = pX + progFrac * profW;
+      const floatIdx = progFrac * (wps.length - 1);
+      const idx0 = Math.floor(floatIdx);
+      const idx1 = Math.min(wps.length - 1, idx0 + 1);
+      const tIdx = floatIdx - idx0;
+      const interpEle = (Number(wps[idx0][2]) || 0) * (1 - tIdx) + (Number(wps[idx1][2]) || 0) * tIdx;
+      const profDotY = (pY - 4) - ((interpEle - minEle) / eleSpan) * profH;
+
       hudCtx.fillStyle = '#FFFFFF';
       hudCtx.beginPath();
-      hudCtx.arc(profDotX, pY - 22, 4, 0, Math.PI * 2);
+      hudCtx.arc(profDotX, profDotY, 4, 0, Math.PI * 2);
       hudCtx.fill();
       hudCtx.restore();
 
@@ -1512,12 +1552,13 @@
 
       // 5. Position AI Bots along -Z
       if (botsGroup) {
-        const riderLoop = ((localDist % 4000) + 4000) % 4000;
+        const routeTot = Math.max(100, state.routeTotalMeters || 4000);
+        const riderLoop = ((localDist % routeTot) + routeTot) % routeTot;
         for (let b = 0; b < botsGroup.children.length; b++) {
           const botMesh = botsGroup.children[b];
           const bData = bots[b];
           let relDist = bData.dist - riderLoop;
-          if (relDist < -20) relDist += 4000;
+          if (relDist < -20) relDist += routeTot;
           if (relDist < 220) {
             botMesh.visible = true;
             const relD = Math.max(0, relDist);
@@ -1549,8 +1590,9 @@
         state.crankAngleRad += ((state.rpm / 60) * Math.PI * 2) * dt;
 
         // Update AI Bot distances
+        const routeTot = Math.max(100, state.routeTotalMeters || 4000);
         for (let i = 0; i < bots.length; i++) {
-          bots[i].dist = (bots[i].dist + bots[i].speedMs * dt) % 4000;
+          bots[i].dist = (bots[i].dist + bots[i].speedMs * dt) % routeTot;
         }
 
         // If in MAP Mode, render the full 2D Tactical OpenStreetMap View

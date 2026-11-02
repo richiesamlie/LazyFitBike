@@ -29,7 +29,37 @@ class TelemetrySender(context: Context) {
     companion object {
         const val TELEMETRY_PATH = "/lazyfitbike/telemetry"
         const val LEGACY_TELEMETRY_PATH = "/velopulse/telemetry"
+        const val CONTROL_PATH = "/lazyfitbike/control"
+        const val LEGACY_CONTROL_PATH = "/velopulse/control"
         const val UDP_PORT = 45454
+    }
+
+    suspend fun sendControlMessage(command: String) {
+        val payloadBytes = command.toByteArray(Charsets.UTF_8)
+        val udpPayloadBytes = "v1|CTRL|$command".toByteArray(Charsets.UTF_8)
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val nodes = nodeClient.connectedNodes.await()
+                _connectedNodeCount.value = nodes.size
+                for (node in nodes) {
+                    messageClient.sendMessage(node.id, CONTROL_PATH, payloadBytes).await()
+                    messageClient.sendMessage(node.id, LEGACY_CONTROL_PATH, payloadBytes).await()
+                }
+            }
+            runCatching {
+                DatagramSocket().use { socket ->
+                    socket.broadcast = true
+                    val broadcastAddress = InetAddress.getByName("255.255.255.255")
+                    val packet = DatagramPacket(
+                        udpPayloadBytes,
+                        udpPayloadBytes.size,
+                        broadcastAddress,
+                        UDP_PORT
+                    )
+                    socket.send(packet)
+                }
+            }
+        }
     }
 
     suspend fun sendTelemetry(mode: String, rpm: Float, bpm: Int, timestampMs: Long) {

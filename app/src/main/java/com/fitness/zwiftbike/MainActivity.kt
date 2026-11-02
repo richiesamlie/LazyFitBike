@@ -285,7 +285,7 @@ private fun pushRoutePolylineToWebView(view: WebView?, polylineJson: String) {
 private fun pushRideStateToWebView(view: WebView?, state: RideUiState) {
     val jsCall = String.format(
         Locale.US,
-        "if(window.updateRideState){window.updateRideState(%.2f,%d,%d,%.2f,%.2f,'%s',%.6f,%.6f,%.3f,%b,%d,%.2f,%d,%d,%d,%d,'%s');}",
+        "if(window.updateRideState){window.updateRideState(%.2f,%d,%d,%.2f,%.2f,'%s',%.6f,%.6f,%.3f,%b,%d,%.2f,%d,%d,%d,%d,'%s',%b,'%s',%.1f);}",
         state.speedKmh,
         state.rpm,
         state.watts,
@@ -302,7 +302,10 @@ private fun pushRideStateToWebView(view: WebView?, state: RideUiState) {
         state.powerZone,
         state.hrZone,
         state.elapsedSeconds,
-        state.activeRouteName.replace("'", "\\'")
+        state.activeRouteName.replace("'", "\\'"),
+        state.isDrafting,
+        state.nearestBotLabel.replace("'", "\\'"),
+        state.activeRouteDistanceMeters
     )
     view?.evaluateJavascript(jsCall, null)
 
@@ -397,6 +400,9 @@ fun LazyFitBikeCockpitScreen(
         state.hrZone,
         state.elapsedSeconds,
         state.activeRouteName,
+        state.isDrafting,
+        state.nearestBotLabel,
+        state.activeRouteDistanceMeters,
         state.isWorkoutActive,
         state.workoutName,
         state.workoutTargetWatts,
@@ -879,6 +885,53 @@ fun LazyFitBikeCockpitScreen(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onExportGoogleSheets,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 42.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = SignalEmerald,
+                                    contentColor = Color.Black
+                                )
+                            ) {
+                                Text("Sheets CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = onExportCanvaStory,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 42.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF7C3AED),
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                Text("Canva Story", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = onBackupGoogleDrive,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 42.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF1E3A8A),
+                                    contentColor = Color(0xFF93C5FD)
+                                )
+                            ) {
+                                Text("Drive Vault", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
 
                         if (state.statusBannerMessage.isNotBlank()) {

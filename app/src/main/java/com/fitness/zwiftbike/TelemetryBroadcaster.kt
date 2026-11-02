@@ -42,6 +42,24 @@ object TelemetryBroadcaster {
 
     private val lastBroadcastTimeMs = AtomicLong(0L)
     private const val MIN_BROADCAST_INTERVAL_MS = 950L
+    @Volatile
+    private var lastSeenCheerId: String = ""
+
+    /**
+     * Parses a /api/cheer JSON payload and returns Pair(cheerId, formattedMessage) for the newest cheer.
+     */
+    fun parseLatestCheer(json: String): Pair<String, String>? {
+        return runCatching {
+            val itemRegex = Regex("""\{[^{}]*"id"\s*:\s*"([^"]+)"[^{}]*\}""")
+            val lastMatch = itemRegex.findAll(json).lastOrNull() ?: return null
+            val block = lastMatch.value
+            val id = lastMatch.groupValues[1]
+            val sender = Regex(""""sender"\s*:\s*"([^"]*)"""").find(block)?.groupValues?.get(1)?.ifBlank { "Spectator" } ?: "Spectator"
+            val msg = Regex(""""message"\s*:\s*"([^"]*)"""").find(block)?.groupValues?.get(1) ?: return null
+            if (id.isBlank() || msg.isBlank()) return null
+            id to "📣 $sender: $msg"
+        }.getOrNull()
+    }
 
     /**
      * Serializes a SpectatorPacket into a standard JSON string without unmocked Android dependencies.
@@ -176,19 +194,47 @@ object TelemetryBroadcaster {
     }
 
     /**
-     * Asynchronously fires a broadcast packet on Dispatchers.IO.
+     * Asynchronously fires a broadcast packet on Dispatchers.IO and checks for new spectator cheers.
      */
     fun broadcastAsync(
         scope: CoroutineScope,
         spectatorEndpoint: String,
         packet: SpectatorPacket,
+        onCheerReceived: (String) -> Unit = {},
         onResult: (Boolean) -> Unit = {}
     ) {
         if (spectatorEndpoint.isBlank()) return
         scope.launch(Dispatchers.IO) {
             val success = broadcast(spectatorEndpoint, packet)
             onResult(success)
+            if (success && spectatorEndpoint.contains("/api/telemetry")) {
+                val cheerUrl = spectatorEndpoint.replace("/api/telemetry", "/api/cheer")
+                fetchNewestUnseenCheer(cheerUrl)?.let(onCheerReceived)
+            }
         }
+    }
+
+    private fun fetchNewestUnseenCheer(cheerEndpoint: String): String? {
+        return runCatching {
+            val conn = (URL(cheerEndpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 1000
+                readTimeout = 1000
+                setRequestProperty("Accept", "application/json")
+            }
+            try {
+                if (conn.responseCode in 200..299) {
+                    val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    val (id, formatted) = parseLatestCheer(body) ?: return null
+                    if (id != lastSeenCheerId) {
+                        lastSeenCheerId = id
+                        formatted
+                    } else null
+                } else null
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrNull()
     }
 
     private fun escapeJson(str: String): String {

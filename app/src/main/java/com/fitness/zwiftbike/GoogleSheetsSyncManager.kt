@@ -118,6 +118,12 @@ object GoogleSheetsSyncManager {
             val fullCsvContent = "$CSV_HEADER\n${buildCsvRow(summary, routeName, riderWeightKg, distanceKm, caloriesKcal, avgRpm, avgBpm)}\n"
             file.writeText(fullCsvContent, Charsets.UTF_8)
 
+            runCatching {
+                val tsv = buildTsvClipboardSnippet(summary, routeName, riderWeightKg, distanceKm, caloriesKcal, avgRpm, avgBpm)
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("LazyFitBike Telemetry TSV", tsv))
+            }
+
             val uri = FileProvider.getUriForFile(
                 context,
                 "${context.packageName}.fileprovider",
