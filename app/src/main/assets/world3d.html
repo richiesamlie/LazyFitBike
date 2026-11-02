@@ -1438,6 +1438,16 @@
     // ===============================================
     // CURVED HOLOGRAPHIC FIGHTER-JET VISOR HUD (3D)
     // ===============================================
+    function updateVisorFrustumScale(w, h) {
+      if (!visorMesh || !camera) return;
+      const aspect = (w && h) ? (w / h) : (camera.aspect || 1.78);
+      const vFovRad = (camera.fov * Math.PI) / 180.0;
+      const depth = 1.5;
+      const frustumH = 2.0 * depth * Math.tan(vFovRad * 0.5);
+      const frustumW = frustumH * aspect;
+      visorMesh.scale.set(frustumW, frustumH, 1);
+    }
+
     function createCurvedVisorHud() {
       hudCanvas = document.createElement('canvas');
       hudCanvas.width = 1600;
@@ -1449,21 +1459,20 @@
       hudTexture.minFilter = THREE.LinearFilter;
       hudTexture.magFilter = THREE.LinearFilter;
 
-      // Curved Visor Cylinder: Radius 1.75m, Height 1.05m, subtending ~79 degrees
-      const visorRadius = 1.75;
-      const visorHeight = 1.05;
-      const visorArc = Math.PI * 0.44; // ~79 degrees
-      const visorGeo = new THREE.CylinderGeometry(
-        visorRadius, visorRadius, visorHeight, 40, 1, true,
-        -visorArc / 2, visorArc
-      );
-      // Flip Z so inner concave face curves in front of the camera at z = -1.75 without flipping X
-      visorGeo.scale(1, 1, -1);
+      // Full-frustum gently curved visor mesh centered at z = -1.5m
+      const visorGeo = new THREE.PlaneGeometry(1, 1, 32, 1);
+      const posAttr = visorGeo.attributes.position;
+      for (let i = 0; i < posAttr.count; i++) {
+        const u = posAttr.getX(i); // -0.5 .. +0.5
+        const curveZ = -1.5 + (u * u) * 0.14;
+        posAttr.setZ(i, curveZ);
+      }
+      posAttr.needsUpdate = true;
 
       const visorMat = new THREE.MeshBasicMaterial({
         map: hudTexture,
         transparent: true,
-        opacity: 0.96,
+        opacity: 0.97,
         side: THREE.DoubleSide,
         depthTest: false,
         depthWrite: false
@@ -1475,6 +1484,7 @@
       visorMesh.rotation.set(0, 0, 0);
       // Parent directly to camera so it remains centered in view across CHASE, POV, DRONE
       camera.add(visorMesh);
+      updateVisorFrustumScale(window.innerWidth, window.innerHeight);
     }
 
     // Canvas helper for rounded glass panels with smooth borders
@@ -1494,15 +1504,15 @@
         ctx.lineTo(x, y + r);
         ctx.quadraticCurveTo(x, y, x + r, y);
       }
-      ctx.fillStyle = 'rgba(9, 9, 11, ' + (bgAlpha !== undefined ? bgAlpha : 0.78) + ')';
+      ctx.fillStyle = 'rgba(9, 9, 11, ' + (bgAlpha !== undefined ? bgAlpha : 0.84) + ')';
       ctx.fill();
-      ctx.strokeStyle = borderColor || 'rgba(255, 255, 255, 0.14)';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = borderColor || 'rgba(255, 255, 255, 0.18)';
+      ctx.lineWidth = 2.0;
       ctx.stroke();
       ctx.restore();
     }
 
-    // High-DPI 2D Visor HUD Painter: Layout A (Open Center Viewport)
+    // High-DPI 2D Visor HUD Painter: Full-Viewport Cockpit Layout (Open Center for Cyclist)
     function renderVisorHud(now) {
       if (!hudCtx) return;
       const w = hudCanvas.width;
@@ -1520,22 +1530,22 @@
 
       const cx = w * 0.5;
 
-      // 1. TOP-CENTER FLOATING PILL (Workout Ribbon or Route Pill)
+      // 1. TOP-CENTER FLOATING PILL (Workout Ribbon or Live Turn & Grade Pill)
       if (state.isWorkoutActive) {
-        const pillW = 660;
-        const pillH = 68;
+        const pillW = 780;
+        const pillH = 88;
         const pillX = cx - pillW / 2;
-        const pillY = 56;
+        const pillY = 112;
         const isPulse = (state.workoutStepRemainingSec <= 3 || state.isWorkoutPaused) && Math.sin(now * 0.015) > 0;
         const borderColor = isPulse ? '#F43F5E' : pColor;
 
-        drawGlassPanel(hudCtx, pillX, pillY, pillW, pillH, 34, borderColor, 0.88);
+        drawGlassPanel(hudCtx, pillX, pillY, pillW, pillH, 36, borderColor, 0.90);
 
         // Top accent line in target zone color
         hudCtx.save();
         hudCtx.fillStyle = isPulse ? '#F43F5E' : pColor;
         hudCtx.beginPath();
-        hudCtx.roundRect ? hudCtx.roundRect(pillX + 30, pillY, pillW - 60, 3.5, 2) : hudCtx.rect(pillX + 30, pillY, pillW - 60, 3.5);
+        hudCtx.roundRect ? hudCtx.roundRect(pillX + 34, pillY, pillW - 68, 4.5, 2) : hudCtx.rect(pillX + 34, pillY, pillW - 68, 4.5);
         hudCtx.fill();
         hudCtx.restore();
 
@@ -1543,17 +1553,17 @@
         hudCtx.save();
         hudCtx.textAlign = 'left';
         hudCtx.fillStyle = '#A1A1AA';
-        hudCtx.font = 'bold 11px sans-serif';
+        hudCtx.font = 'bold 14px sans-serif';
         const biasText = state.workoutIntensityBiasPercent !== 0 ? ' (' + (state.workoutIntensityBiasPercent > 0 ? '+' : '') + state.workoutIntensityBiasPercent + '%)' : '';
-        hudCtx.fillText('STEP ' + (state.workoutStepIndex + 1) + ' OF ' + state.workoutTotalSteps + biasText, pillX + 28, pillY + 26);
+        hudCtx.fillText('STEP ' + (state.workoutStepIndex + 1) + ' OF ' + state.workoutTotalSteps + biasText, pillX + 32, pillY + 30);
 
         hudCtx.fillStyle = '#FFFFFF';
-        hudCtx.font = '900 16px sans-serif';
-        hudCtx.fillText(state.workoutStepName.toUpperCase(), pillX + 28, pillY + 45);
+        hudCtx.font = '900 22px sans-serif';
+        hudCtx.fillText(state.workoutStepName.toUpperCase(), pillX + 32, pillY + 56);
 
         hudCtx.fillStyle = '#38BDF8';
-        hudCtx.font = 'bold 11px sans-serif';
-        hudCtx.fillText('TARGET ' + state.workoutTargetWatts + 'W @ ' + state.workoutTargetRpm + ' RPM', pillX + 28, pillY + 60);
+        hudCtx.font = 'bold 15px sans-serif';
+        hudCtx.fillText('TARGET ' + state.workoutTargetWatts + 'W @ ' + state.workoutTargetRpm + ' RPM', pillX + 32, pillY + 76);
         hudCtx.restore();
 
         // Center Section: Prominent Countdown Timer
@@ -1563,176 +1573,176 @@
         const remSecs = state.workoutStepRemainingSec % 60;
         const remStr = String(remMins).padStart(2, '0') + ':' + String(remSecs).padStart(2, '0');
         hudCtx.fillStyle = isPulse ? '#F43F5E' : '#FFFFFF';
-        hudCtx.font = '900 32px sans-serif';
-        hudCtx.fillText(remStr, cx, pillY + 42);
+        hudCtx.font = '900 44px sans-serif';
+        hudCtx.fillText(remStr, cx, pillY + 54);
 
         hudCtx.fillStyle = isPulse ? '#F43F5E' : '#A1A1AA';
-        hudCtx.font = 'bold 10px sans-serif';
-        hudCtx.fillText(state.isWorkoutPaused ? 'PAUSED' : 'REMAINING', cx, pillY + 58);
+        hudCtx.font = 'bold 13px sans-serif';
+        hudCtx.fillText(state.isWorkoutPaused ? 'PAUSED' : 'REMAINING', cx, pillY + 74);
         hudCtx.restore();
 
         // Right Section: Earned Stars & Compliance
         hudCtx.save();
         hudCtx.textAlign = 'right';
         hudCtx.fillStyle = '#FBBF24';
-        hudCtx.font = 'bold 15px sans-serif';
-        hudCtx.fillText('★ ' + state.workoutEarnedStars, pillX + pillW - 28, pillY + 26);
+        hudCtx.font = 'bold 20px sans-serif';
+        hudCtx.fillText('★ ' + state.workoutEarnedStars, pillX + pillW - 32, pillY + 32);
 
         hudCtx.fillStyle = '#34D399';
-        hudCtx.font = '900 14px sans-serif';
-        hudCtx.fillText(state.workoutCompliancePercent.toFixed(0) + '% COMPL', pillX + pillW - 28, pillY + 44);
+        hudCtx.font = '900 18px sans-serif';
+        hudCtx.fillText(state.workoutCompliancePercent.toFixed(0) + '% COMPL', pillX + pillW - 32, pillY + 56);
 
         if (state.workoutPacingPrompt) {
           hudCtx.fillStyle = state.workoutPacingPrompt.indexOf('ON TARGET') !== -1 ? '#34D399' : '#F97316';
-          hudCtx.font = 'bold 10px sans-serif';
-          hudCtx.fillText(state.workoutPacingPrompt, pillX + pillW - 28, pillY + 60);
+          hudCtx.font = 'bold 13px sans-serif';
+          hudCtx.fillText(state.workoutPacingPrompt, pillX + pillW - 32, pillY + 76);
         }
         hudCtx.restore();
       } else {
-        const pillW = 500;
-        const pillH = 54;
+        const pillW = 540;
+        const pillH = 68;
         const pillX = cx - pillW / 2;
-        const pillY = 54;
+        const pillY = 114;
         const upcomingTurn = detectUpcomingTurn(state.distanceMeters);
-        const pillBorder = state.isDrafting ? '#34D399' : 'rgba(255, 255, 255, 0.16)';
-        drawGlassPanel(hudCtx, pillX, pillY, pillW, pillH, 27, pillBorder, 0.82);
+        const pillBorder = state.isDrafting ? '#34D399' : 'rgba(255, 255, 255, 0.20)';
+        drawGlassPanel(hudCtx, pillX, pillY, pillW, pillH, 34, pillBorder, 0.86);
 
         // Live GPS Pulsing Dot
         hudCtx.save();
-        hudCtx.fillStyle = '#34D399';
+        hudCtx.fillStyle = upcomingTurn.color;
         hudCtx.beginPath();
-        hudCtx.arc(pillX + 28, pillY + 21, 5, 0, Math.PI * 2);
+        hudCtx.arc(pillX + 30, pillY + 26, 7, 0, Math.PI * 2);
         hudCtx.fill();
 
         hudCtx.textAlign = 'left';
-        hudCtx.fillStyle = '#F4F4F5';
-        hudCtx.font = 'bold 13px sans-serif';
-        hudCtx.fillText(state.activeRouteName.toUpperCase(), pillX + 44, pillY + 24);
+        hudCtx.fillStyle = upcomingTurn.color;
+        hudCtx.font = '900 20px sans-serif';
+        hudCtx.fillText(upcomingTurn.label, pillX + 48, pillY + 32);
 
-        hudCtx.fillStyle = state.isDrafting ? '#34D399' : '#A1A1AA';
-        hudCtx.font = 'bold 11px sans-serif';
-        hudCtx.fillText(state.nearestBotLabel, pillX + 44, pillY + 42);
+        hudCtx.fillStyle = state.isDrafting ? '#34D399' : '#D4D4D8';
+        hudCtx.font = 'bold 15px sans-serif';
+        hudCtx.fillText(state.nearestBotLabel, pillX + 48, pillY + 54);
 
         hudCtx.textAlign = 'right';
         hudCtx.fillStyle = gradeColor;
-        hudCtx.font = '900 14px sans-serif';
+        hudCtx.font = '900 28px sans-serif';
         const gSign = state.gradePercent >= 0 ? '+' : '';
-        hudCtx.fillText(gSign + state.gradePercent.toFixed(1) + '%', pillX + pillW - 24, pillY + 24);
-
-        hudCtx.fillStyle = upcomingTurn.color;
-        hudCtx.font = 'bold 11px sans-serif';
-        hudCtx.fillText(upcomingTurn.label, pillX + pillW - 24, pillY + 42);
+        hudCtx.fillText(gSign + state.gradePercent.toFixed(1) + '%', pillX + pillW - 28, pillY + 44);
         hudCtx.restore();
       }
 
       // 2. BOTTOM-LEFT FLOATING EFFORT CAPSULE (Watts, Zone, Cadence, HR)
-      const leftCapsuleX = 76;
-      const leftCapsuleY = 485;
-      const capsuleW = 350;
-      const capsuleH = 160;
+      const leftCapsuleX = 28;
+      const leftCapsuleY = 392;
+      const capsuleW = 500;
+      const capsuleH = 236;
 
-      drawGlassPanel(hudCtx, leftCapsuleX, leftCapsuleY, capsuleW, capsuleH, 24, 'rgba(255, 255, 255, 0.14)', 0.80);
+      drawGlassPanel(hudCtx, leftCapsuleX, leftCapsuleY, capsuleW, capsuleH, 28, 'rgba(255, 255, 255, 0.18)', 0.86);
 
       // Corner accent indicator
       hudCtx.save();
       hudCtx.fillStyle = pColor;
       hudCtx.beginPath();
-      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX, leftCapsuleY + 24, 4, 60, 2) : hudCtx.rect(leftCapsuleX, leftCapsuleY + 24, 4, 60);
+      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX, leftCapsuleY + 28, 6, 92, 3) : hudCtx.rect(leftCapsuleX, leftCapsuleY + 28, 6, 92);
       hudCtx.fill();
 
       // Capsule Header
       hudCtx.textAlign = 'left';
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('EFFORT & VITALS', leftCapsuleX + 22, leftCapsuleY + 26);
+      hudCtx.fillStyle = '#D4D4D8';
+      hudCtx.font = 'bold 15px sans-serif';
+      hudCtx.fillText('EFFORT & VITALS', leftCapsuleX + 28, leftCapsuleY + 34);
 
       // Hero Watts
       hudCtx.fillStyle = pColor;
-      hudCtx.font = '900 58px sans-serif';
+      hudCtx.font = '900 82px sans-serif';
       hudCtx.shadowColor = pColor;
-      hudCtx.shadowBlur = 12;
-      hudCtx.fillText(String(state.watts), leftCapsuleX + 22, leftCapsuleY + 84);
+      hudCtx.shadowBlur = 14;
+      hudCtx.fillText(String(state.watts), leftCapsuleX + 26, leftCapsuleY + 116);
       hudCtx.shadowBlur = 0;
 
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('W  (' + state.wattsPerKg.toFixed(1) + ' W/KG)', leftCapsuleX + 24, leftCapsuleY + 104);
+      hudCtx.fillStyle = '#E4E4E7';
+      hudCtx.font = 'bold 17px sans-serif';
+      hudCtx.fillText('W  (' + state.wattsPerKg.toFixed(1) + ' W/KG)', leftCapsuleX + 28, leftCapsuleY + 146);
 
       // Zone Pill
-      hudCtx.fillStyle = 'rgba(9, 9, 11, 0.85)';
-      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX + 22, leftCapsuleY + 114, 112, 22, 6) : hudCtx.rect(leftCapsuleX + 22, leftCapsuleY + 114, 112, 22);
+      const zonePillW = 176;
+      hudCtx.fillStyle = 'rgba(9, 9, 11, 0.90)';
+      hudCtx.beginPath();
+      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX + 28, leftCapsuleY + 162, zonePillW, 34, 8) : hudCtx.rect(leftCapsuleX + 28, leftCapsuleY + 162, zonePillW, 34);
       hudCtx.fill();
       hudCtx.strokeStyle = pColor;
-      hudCtx.lineWidth = 1;
+      hudCtx.lineWidth = 1.8;
       hudCtx.stroke();
       hudCtx.fillStyle = pColor;
-      hudCtx.font = 'bold 11px sans-serif';
+      hudCtx.font = '900 16px sans-serif';
       hudCtx.textAlign = 'center';
-      hudCtx.fillText(pZoneName, leftCapsuleX + 78, leftCapsuleY + 129);
+      hudCtx.fillText(pZoneName, leftCapsuleX + 28 + zonePillW * 0.5, leftCapsuleY + 185);
 
       // Horizontal Power Progress Bar along bottom of watts section
-      const barW = 112;
-      hudCtx.fillStyle = 'rgba(39, 39, 42, 0.85)';
-      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX + 22, leftCapsuleY + 144, barW, 5, 2.5) : hudCtx.rect(leftCapsuleX + 22, leftCapsuleY + 144, barW, 5);
+      hudCtx.fillStyle = 'rgba(39, 39, 42, 0.90)';
+      hudCtx.beginPath();
+      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX + 28, leftCapsuleY + 210, zonePillW, 8, 4) : hudCtx.rect(leftCapsuleX + 28, leftCapsuleY + 210, zonePillW, 8);
       hudCtx.fill();
       hudCtx.fillStyle = pColor;
-      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX + 22, leftCapsuleY + 144, barW * powerFraction, 5, 2.5) : hudCtx.rect(leftCapsuleX + 22, leftCapsuleY + 144, barW * powerFraction, 5);
+      hudCtx.beginPath();
+      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX + 28, leftCapsuleY + 210, zonePillW * powerFraction, 8, 4) : hudCtx.rect(leftCapsuleX + 28, leftCapsuleY + 210, zonePillW * powerFraction, 8);
       hudCtx.fill();
 
       // Target power marker tick if in workout
       if (state.isWorkoutActive && state.workoutTargetWatts > 0) {
         const targetFrac = Math.min(1.0, Math.max(0.0, state.workoutTargetWatts / maxDisplayWatts));
         hudCtx.fillStyle = '#FFFFFF';
-        hudCtx.fillRect(leftCapsuleX + 22 + barW * targetFrac - 1, leftCapsuleY + 142, 2.5, 9);
+        hudCtx.fillRect(leftCapsuleX + 28 + zonePillW * targetFrac - 1.5, leftCapsuleY + 206, 3, 16);
       }
 
       // Vertical Divider
-      hudCtx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
-      hudCtx.lineWidth = 1;
+      hudCtx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+      hudCtx.lineWidth = 1.5;
       hudCtx.beginPath();
-      hudCtx.moveTo(leftCapsuleX + 160, leftCapsuleY + 24);
-      hudCtx.lineTo(leftCapsuleX + 160, leftCapsuleY + 146);
+      hudCtx.moveTo(leftCapsuleX + 228, leftCapsuleY + 28);
+      hudCtx.lineTo(leftCapsuleX + 228, leftCapsuleY + 214);
       hudCtx.stroke();
 
       // Cadence (RPM)
+      const rightColX = leftCapsuleX + 252;
       hudCtx.textAlign = 'left';
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 11px sans-serif';
-      hudCtx.fillText('CADENCE', leftCapsuleX + 182, leftCapsuleY + 44);
+      hudCtx.fillStyle = '#D4D4D8';
+      hudCtx.font = 'bold 14px sans-serif';
+      hudCtx.fillText('CADENCE', rightColX, leftCapsuleY + 54);
 
       hudCtx.fillStyle = '#38BDF8';
-      hudCtx.font = '900 30px sans-serif';
-      hudCtx.fillText(String(state.rpm), leftCapsuleX + 182, leftCapsuleY + 76);
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('RPM', leftCapsuleX + 248, leftCapsuleY + 74);
+      hudCtx.font = '900 48px sans-serif';
+      hudCtx.fillText(String(state.rpm), rightColX, leftCapsuleY + 104);
+      hudCtx.fillStyle = '#E4E4E7';
+      hudCtx.font = 'bold 17px sans-serif';
+      hudCtx.fillText('RPM', rightColX + 105, leftCapsuleY + 100);
 
       // Heart Rate (BPM)
       const hrBpm = state.bpm > 0 ? state.bpm : '--';
-      const heartPulse = 1.0 + (Math.sin(now * 0.009) * 0.12);
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 11px sans-serif';
-      hudCtx.fillText('HEART RATE', leftCapsuleX + 182, leftCapsuleY + 104);
+      const heartPulse = 1.0 + (Math.sin(now * 0.009) * 0.14);
+      hudCtx.fillStyle = '#D4D4D8';
+      hudCtx.font = 'bold 14px sans-serif';
+      hudCtx.fillText('HEART RATE', rightColX, leftCapsuleY + 144);
 
       hudCtx.fillStyle = hrColor;
-      hudCtx.font = '900 30px sans-serif';
-      hudCtx.fillText(String(hrBpm), leftCapsuleX + 182, leftCapsuleY + 136);
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('BPM', leftCapsuleX + 250, leftCapsuleY + 134);
+      hudCtx.font = '900 48px sans-serif';
+      hudCtx.fillText(String(hrBpm), rightColX, leftCapsuleY + 194);
+      hudCtx.fillStyle = '#E4E4E7';
+      hudCtx.font = 'bold 17px sans-serif';
+      hudCtx.fillText('BPM', rightColX + 105, leftCapsuleY + 190);
 
       // Mini Cardiac waveform
       hudCtx.strokeStyle = hrColor;
-      hudCtx.lineWidth = 1.8;
+      hudCtx.lineWidth = 2.5;
       hudCtx.beginPath();
-      const waveX = leftCapsuleX + 182;
-      const waveY = leftCapsuleY + 148;
+      const waveX = rightColX;
+      const waveY = leftCapsuleY + 214;
       hudCtx.moveTo(waveX, waveY);
-      hudCtx.lineTo(waveX + 28, waveY);
-      hudCtx.lineTo(waveX + 38, waveY - 8 * heartPulse);
-      hudCtx.lineTo(waveX + 48, waveY + 8 * heartPulse);
-      hudCtx.lineTo(waveX + 58, waveY);
-      hudCtx.lineTo(waveX + 140, waveY);
+      hudCtx.lineTo(waveX + 42, waveY);
+      hudCtx.lineTo(waveX + 56, waveY - 11 * heartPulse);
+      hudCtx.lineTo(waveX + 70, waveY + 11 * heartPulse);
+      hudCtx.lineTo(waveX + 84, waveY);
+      hudCtx.lineTo(waveX + 210, waveY);
       hudCtx.stroke();
       hudCtx.restore();
 
@@ -1740,67 +1750,69 @@
       const rightCapsuleX = w - leftCapsuleX - capsuleW;
       const rightCapsuleY = leftCapsuleY;
 
-      drawGlassPanel(hudCtx, rightCapsuleX, rightCapsuleY, capsuleW, capsuleH, 24, 'rgba(255, 255, 255, 0.14)', 0.80);
+      drawGlassPanel(hudCtx, rightCapsuleX, rightCapsuleY, capsuleW, capsuleH, 28, 'rgba(255, 255, 255, 0.18)', 0.86);
 
       // Header
       hudCtx.save();
       hudCtx.textAlign = 'left';
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('COURSE TELEMETRY', rightCapsuleX + 22, rightCapsuleY + 26);
+      hudCtx.fillStyle = '#D4D4D8';
+      hudCtx.font = 'bold 15px sans-serif';
+      hudCtx.fillText('COURSE TELEMETRY', rightCapsuleX + 28, rightCapsuleY + 34);
 
       const courseTurn = detectUpcomingTurn(state.distanceMeters);
       hudCtx.textAlign = 'right';
       hudCtx.fillStyle = courseTurn.color;
-      hudCtx.font = 'bold 11px sans-serif';
-      hudCtx.fillText(courseTurn.label, rightCapsuleX + capsuleW - 22, rightCapsuleY + 26);
+      hudCtx.font = '900 15px sans-serif';
+      hudCtx.fillText(courseTurn.label, rightCapsuleX + capsuleW - 26, rightCapsuleY + 34);
       hudCtx.textAlign = 'left';
 
       // Hero Speed
       hudCtx.fillStyle = '#FFFFFF';
-      hudCtx.font = '900 54px sans-serif';
-      hudCtx.fillText(state.speedKmh.toFixed(1), rightCapsuleX + 22, rightCapsuleY + 82);
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('KM / H', rightCapsuleX + 24, rightCapsuleY + 102);
+      hudCtx.font = '900 78px sans-serif';
+      hudCtx.fillText(state.speedKmh.toFixed(1), rightCapsuleX + 26, rightCapsuleY + 114);
+      hudCtx.fillStyle = '#E4E4E7';
+      hudCtx.font = 'bold 17px sans-serif';
+      hudCtx.fillText('KM / H', rightCapsuleX + 28, rightCapsuleY + 144);
 
       // Distance & Elapsed Time
       const mins = Math.floor(state.elapsedSeconds / 60);
       const secs = state.elapsedSeconds % 60;
       const timeStr = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
       hudCtx.fillStyle = '#F4F4F5';
-      hudCtx.font = 'bold 14px sans-serif';
-      hudCtx.fillText((state.distanceMeters / 1000).toFixed(2) + ' KM', rightCapsuleX + 24, rightCapsuleY + 128);
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 12px sans-serif';
-      hudCtx.fillText('TIME ' + timeStr, rightCapsuleX + 24, rightCapsuleY + 146);
+      hudCtx.font = '900 22px sans-serif';
+      hudCtx.fillText((state.distanceMeters / 1000).toFixed(2) + ' KM', rightCapsuleX + 28, rightCapsuleY + 182);
+      hudCtx.fillStyle = '#D4D4D8';
+      hudCtx.font = 'bold 17px sans-serif';
+      hudCtx.fillText('TIME ' + timeStr, rightCapsuleX + 28, rightCapsuleY + 212);
 
       // Vertical Divider
-      hudCtx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
-      hudCtx.lineWidth = 1;
+      hudCtx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+      hudCtx.lineWidth = 1.5;
       hudCtx.beginPath();
-      hudCtx.moveTo(rightCapsuleX + 175, rightCapsuleY + 24);
-      hudCtx.lineTo(rightCapsuleX + 175, rightCapsuleY + 146);
+      hudCtx.moveTo(rightCapsuleX + 236, rightCapsuleY + 46);
+      hudCtx.lineTo(rightCapsuleX + 236, rightCapsuleY + 214);
       hudCtx.stroke();
 
       // Road Grade
-      hudCtx.fillStyle = '#A1A1AA';
-      hudCtx.font = 'bold 11px sans-serif';
-      hudCtx.fillText('ROAD GRADE', rightCapsuleX + 195, rightCapsuleY + 44);
+      const gradeColX = rightCapsuleX + 258;
+      hudCtx.fillStyle = '#D4D4D8';
+      hudCtx.font = 'bold 14px sans-serif';
+      hudCtx.fillText('ROAD GRADE', gradeColX, rightCapsuleY + 62);
 
       hudCtx.fillStyle = gradeColor;
-      hudCtx.font = '900 28px sans-serif';
+      hudCtx.font = '900 44px sans-serif';
       const gradeSign = state.gradePercent >= 0 ? '+' : '';
-      hudCtx.fillText(gradeSign + state.gradePercent.toFixed(1) + '%', rightCapsuleX + 195, rightCapsuleY + 78);
+      hudCtx.fillText(gradeSign + state.gradePercent.toFixed(1) + '%', gradeColX, rightCapsuleY + 112);
 
       // Mini Elevation Profile Ribbon (Dynamic from active routeWaypoints)
-      const pX = rightCapsuleX + 195;
-      const pY = rightCapsuleY + 138;
-      const profW = 125;
-      const profH = 34;
+      const pX = gradeColX;
+      const pY = rightCapsuleY + 206;
+      const profW = 212;
+      const profH = 54;
 
-      hudCtx.fillStyle = 'rgba(39, 39, 42, 0.65)';
-      hudCtx.roundRect ? hudCtx.roundRect(pX, rightCapsuleY + 95, profW, 46, 6) : hudCtx.rect(pX, rightCapsuleY + 95, profW, 46);
+      hudCtx.fillStyle = 'rgba(39, 39, 42, 0.75)';
+      hudCtx.beginPath();
+      hudCtx.roundRect ? hudCtx.roundRect(pX, rightCapsuleY + 136, profW, 78, 10) : hudCtx.rect(pX, rightCapsuleY + 136, profW, 78);
       hudCtx.fill();
 
       const wps = (Array.isArray(routeWaypoints) && routeWaypoints.length >= 2)
@@ -1816,13 +1828,13 @@
       const eleSpan = Math.max(15, maxEle - minEle);
 
       hudCtx.strokeStyle = '#F97316';
-      hudCtx.lineWidth = 2;
+      hudCtx.lineWidth = 3;
       hudCtx.beginPath();
       for (let i = 0; i < wps.length; i++) {
         const xFrac = i / (wps.length - 1);
         const yFrac = ((Number(wps[i][2]) || 0) - minEle) / eleSpan;
-        const wx = pX + xFrac * profW;
-        const wy = (pY - 4) - yFrac * profH;
+        const wx = pX + 6 + xFrac * (profW - 12);
+        const wy = (pY - 6) - yFrac * profH;
         if (i === 0) hudCtx.moveTo(wx, wy);
         else hudCtx.lineTo(wx, wy);
       }
@@ -1831,17 +1843,17 @@
       // Rider dot on elevation profile
       const routeTot = Math.max(100, state.routeTotalMeters || 4000);
       const progFrac = Math.min(1.0, Math.max(0.0, (state.distanceMeters % routeTot) / routeTot));
-      const profDotX = pX + progFrac * profW;
+      const profDotX = pX + 6 + progFrac * (profW - 12);
       const floatIdx = progFrac * (wps.length - 1);
       const idx0 = Math.floor(floatIdx);
       const idx1 = Math.min(wps.length - 1, idx0 + 1);
       const tIdx = floatIdx - idx0;
       const interpEle = (Number(wps[idx0][2]) || 0) * (1 - tIdx) + (Number(wps[idx1][2]) || 0) * tIdx;
-      const profDotY = (pY - 4) - ((interpEle - minEle) / eleSpan) * profH;
+      const profDotY = (pY - 6) - ((interpEle - minEle) / eleSpan) * profH;
 
       hudCtx.fillStyle = '#FFFFFF';
       hudCtx.beginPath();
-      hudCtx.arc(profDotX, profDotY, 4, 0, Math.PI * 2);
+      hudCtx.arc(profDotX, profDotY, 6, 0, Math.PI * 2);
       hudCtx.fill();
       hudCtx.restore();
 
@@ -2055,6 +2067,7 @@
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
         renderer.setSize(w, h);
+        updateVisorFrustumScale(w, h);
       }
 
       if (state.isMapModalOpen || state.cameraMode === 'MAP') {

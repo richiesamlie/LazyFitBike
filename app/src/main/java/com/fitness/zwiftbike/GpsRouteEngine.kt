@@ -519,9 +519,11 @@ object GpsRouteEngine {
             } else null
 
             val rawPoints = realElevations ?: ArrayList<Triple<Double, Double, Double>>(coordsList.size).apply {
+                val denom = max(1, coordsList.size - 1).toDouble()
                 for (i in coordsList.indices) {
                     val pair = coordsList[i]
-                    val syntheticEle = 85.0 + 18.0 * sin(i * 0.15)
+                    val progress = i.toDouble() / denom
+                    val syntheticEle = 45.0 + 14.0 * sin(progress * PI * 2.0) + 6.0 * sin(progress * PI * 4.0)
                     add(Triple(pair.first, pair.second, syntheticEle))
                 }
             }
