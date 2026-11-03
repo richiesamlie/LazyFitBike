@@ -12,6 +12,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -138,6 +139,10 @@ class MainActivity : ComponentActivity() {
 
             val workoutSummary by rideViewModel.workoutSummary.collectAsState()
 
+            BackHandler {
+                rideViewModel.handleBackPress()
+            }
+
             LazyFitBikeCockpitScreen(
                 state = state,
                 onToggleSensorMode = rideViewModel::toggleSensorMode,
@@ -196,7 +201,9 @@ class MainActivity : ComponentActivity() {
                 onStopWorkout = rideViewModel::stopWorkout,
                 onOpenZwoPicker = { zwoLauncher.launch("*/*") },
                 onApplyNewFtp = rideViewModel::applyNewFtpAndSync,
-                workoutSummary = workoutSummary
+                workoutSummary = workoutSummary,
+                onSetExitConfirmModalOpen = rideViewModel::setExitConfirmModalOpen,
+                onConfirmExitApp = { finish() }
             )
         }
     }
@@ -417,7 +424,9 @@ fun LazyFitBikeCockpitScreen(
     onStopWorkout: () -> Unit,
     onOpenZwoPicker: () -> Unit,
     onApplyNewFtp: (Int) -> Unit,
-    workoutSummary: WorkoutSummary?
+    workoutSummary: WorkoutSummary?,
+    onSetExitConfirmModalOpen: (Boolean) -> Unit = {},
+    onConfirmExitApp: () -> Unit = {}
 ) {
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var stravaAccessToken by remember { mutableStateOf("") }
@@ -2003,6 +2012,84 @@ fun LazyFitBikeCockpitScreen(
                                 ) {
                                     Text("Drive Vault", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // EXIT CONFIRMATION MODAL
+            if (state.isExitConfirmModalOpen) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    HudPod(
+                        modifier = Modifier.width(420.dp),
+                        borderColor = SignalRose
+                    ) {
+                        Text(
+                            text = "EXIT LAZYFITBIKE?",
+                            color = SignalRose,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Black
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        val exitSubtitle = when {
+                            state.isWorkoutActive -> "An active workout (${state.workoutName}) is in progress. Exiting now will close the cockpit."
+                            state.recordedTrackPointsCount > 0 -> "You have ${state.recordedTrackPointsCount} recorded telemetry points (${String.format(Locale.US, "%.2f", state.distanceKm)} km) in this session."
+                            else -> "Are you sure you want to close the LazyFitBike cockpit?"
+                        }
+                        Text(
+                            text = exitSubtitle,
+                            color = TextPrimaryWhite,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { onSetExitConfirmModalOpen(false) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = TextPrimaryWhite
+                                )
+                            ) {
+                                Text(
+                                    text = "Resume Ride",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Button(
+                                onClick = onConfirmExitApp,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = SignalRose,
+                                    contentColor = Color.Black
+                                )
+                            ) {
+                                Text(
+                                    text = "Exit App",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Black
+                                )
                             }
                         }
                     }

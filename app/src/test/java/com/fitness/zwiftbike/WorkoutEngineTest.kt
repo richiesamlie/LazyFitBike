@@ -236,4 +236,23 @@ class WorkoutEngineTest {
         )
         assertTrue(onTargetPrompt.contains("ON TARGET"))
     }
+
+    @Test
+    fun backPressDismissesOpenModalsBeforeShowingExitConfirmation() {
+        val baseState = RideUiState(installedVersionName = "v1.0.0")
+
+        // Pressing back when Map modal is open dismisses Map modal without opening Exit Confirmation
+        val mapOpen = baseState.copy(isMapModalOpen = true)
+        val afterMapBack = mapOpen.reduceBackPress()
+        assertEquals(false, afterMapBack.isMapModalOpen)
+        assertEquals(false, afterMapBack.isExitConfirmModalOpen)
+
+        // Pressing back on main cockpit opens Exit Confirmation modal
+        val afterCockpitBack = afterMapBack.reduceBackPress()
+        assertEquals(true, afterCockpitBack.isExitConfirmModalOpen)
+
+        // Pressing back again while Exit Confirmation is open dismisses it
+        val afterSecondBack = afterCockpitBack.reduceBackPress()
+        assertEquals(false, afterSecondBack.isExitConfirmModalOpen)
+    }
 }

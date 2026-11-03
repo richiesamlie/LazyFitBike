@@ -71,6 +71,7 @@ data class RideUiState(
     val isProfileModalOpen: Boolean = false,
     val isWorkoutModalOpen: Boolean = false,
     val isWorkoutSummaryModalOpen: Boolean = false,
+    val isExitConfirmModalOpen: Boolean = false,
     val isWorkoutActive: Boolean = false,
     val workoutName: String = "",
     val workoutTargetWatts: Int = 0,
@@ -106,7 +107,31 @@ data class RideUiState(
     val mapCenterTriggerId: Long = 0L,
     val mapCenterLat: Double = 0.0,
     val mapCenterLon: Double = 0.0
-)
+) {
+    val hasOpenFeatureModal: Boolean
+        get() = isMapModalOpen ||
+            isStravaModalOpen ||
+            isUpdateModalOpen ||
+            isProfileModalOpen ||
+            isWorkoutModalOpen ||
+            isWorkoutSummaryModalOpen
+
+    fun reduceBackPress(): RideUiState {
+        return when {
+            hasOpenFeatureModal -> copy(
+                isMapModalOpen = false,
+                isStravaModalOpen = false,
+                isUpdateModalOpen = false,
+                isProfileModalOpen = false,
+                isWorkoutModalOpen = false,
+                isWorkoutSummaryModalOpen = false,
+                isExitConfirmModalOpen = false
+            )
+            isExitConfirmModalOpen -> copy(isExitConfirmModalOpen = false)
+            else -> copy(isExitConfirmModalOpen = true)
+        }
+    }
+}
 
 class RideViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -575,7 +600,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             isUpdateModalOpen = false,
             isProfileModalOpen = false,
             isWorkoutModalOpen = false,
-            isWorkoutSummaryModalOpen = false
+            isWorkoutSummaryModalOpen = false,
+            isExitConfirmModalOpen = false
         )
     }
 
@@ -586,7 +612,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             isUpdateModalOpen = false,
             isProfileModalOpen = false,
             isWorkoutModalOpen = false,
-            isWorkoutSummaryModalOpen = false
+            isWorkoutSummaryModalOpen = false,
+            isExitConfirmModalOpen = false
         )
     }
 
@@ -597,7 +624,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             isStravaModalOpen = false,
             isProfileModalOpen = false,
             isWorkoutModalOpen = false,
-            isWorkoutSummaryModalOpen = false
+            isWorkoutSummaryModalOpen = false,
+            isExitConfirmModalOpen = false
         )
         if (open && _uiState.value.latestReleaseTag == "Unchecked") {
             checkGithubUpdates()
@@ -611,7 +639,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             isStravaModalOpen = false,
             isUpdateModalOpen = false,
             isWorkoutModalOpen = false,
-            isWorkoutSummaryModalOpen = false
+            isWorkoutSummaryModalOpen = false,
+            isExitConfirmModalOpen = false
         )
     }
 
@@ -622,7 +651,8 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             isStravaModalOpen = false,
             isUpdateModalOpen = false,
             isProfileModalOpen = false,
-            isWorkoutSummaryModalOpen = false
+            isWorkoutSummaryModalOpen = false,
+            isExitConfirmModalOpen = false
         )
     }
 
@@ -633,8 +663,25 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             isMapModalOpen = false,
             isStravaModalOpen = false,
             isUpdateModalOpen = false,
-            isProfileModalOpen = false
+            isProfileModalOpen = false,
+            isExitConfirmModalOpen = false
         )
+    }
+
+    fun setExitConfirmModalOpen(open: Boolean) {
+        _uiState.value = _uiState.value.copy(
+            isExitConfirmModalOpen = open,
+            isMapModalOpen = false,
+            isStravaModalOpen = false,
+            isUpdateModalOpen = false,
+            isProfileModalOpen = false,
+            isWorkoutModalOpen = false,
+            isWorkoutSummaryModalOpen = false
+        )
+    }
+
+    fun handleBackPress() {
+        _uiState.update { it.reduceBackPress() }
     }
 
     fun saveRiderProfile(
