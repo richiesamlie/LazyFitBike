@@ -559,54 +559,7 @@ fun LazyFitBikeCockpitScreen(
                 .padding(10.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // TOP WATCH CONNECTION STATUS BANNER (Only shown when waiting or signal lost)
-            if (state.connectionState == ConnectionState.WAITING_FOR_WATCH ||
-                state.connectionState == ConnectionState.SIGNAL_LOST
-            ) {
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(BgCarbonHud)
-                            .border(1.dp, SignalAmber, RoundedCornerShape(50))
-                            .padding(horizontal = 14.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        val statusMsg = if (state.connectionState == ConnectionState.WAITING_FOR_WATCH) {
-                            "Waiting for Galaxy Watch 4: tap Start on watch, or test with Demo Mode."
-                        } else {
-                            "Watch telemetry paused (>3s). Check Bluetooth/Wi-Fi or switch to Demo Mode."
-                        }
-                        Text(
-                            text = statusMsg,
-                            color = TextPrimaryWhite,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Button(
-                            onClick = onToggleDemo,
-                            modifier = Modifier.heightIn(min = 36.dp),
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = AccentLime,
-                                contentColor = InkDark
-                            )
-                        ) {
-                            Text(
-                                text = "Enable Demo Slider",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                        }
-                    }
-                }
-            } else {
-                Spacer(modifier = Modifier.height(1.dp))
-            }
+            Spacer(modifier = Modifier.height(1.dp))
 
             // CENTER MODALS (Map Modal, Strava Modal, or GitHub OTA Update Modal)
             if (state.isMapModalOpen) {
@@ -2137,14 +2090,12 @@ fun LazyFitBikeCockpitScreen(
                                 cameraMode = state.cameraMode,
                                 onCycleCamera = onCycleCamera
                             )
-                            if (isDemoActive) {
-                                DemoToggleAndSlider(
-                                    isDemoActive = true,
-                                    demoSliderEffort = state.demoSliderEffort,
-                                    onToggleDemo = onToggleDemo,
-                                    onDemoEffortChange = onDemoEffortChange
-                                )
-                            }
+                            DemoToggleAndSlider(
+                                isDemoActive = isDemoActive,
+                                demoSliderEffort = state.demoSliderEffort,
+                                onToggleDemo = onToggleDemo,
+                                onDemoEffortChange = onDemoEffortChange
+                            )
                         } else {
                             Button(
                                 onClick = { onSetMapModalOpen(!state.isMapModalOpen) },

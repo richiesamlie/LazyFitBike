@@ -2188,7 +2188,7 @@
       const upcomingTurn = detectUpcomingTurn(state.distanceMeters);
 
       // 1. TOP-LEFT LANGKAHFIT STATUS PILL + ROUTE PROGRESS BAR
-      const topPillX = 28;
+      const topPillX = 40;
       const topPillY = 28;
       const topPillW = 472;
       const topPillH = 50;
@@ -2320,7 +2320,7 @@
       } else {
         const turnPillW = 312;
         const turnPillH = 50;
-        const turnPillX = w - 28 - turnPillW;
+        const turnPillX = w - 40 - turnPillW;
         const turnPillY = 28;
         drawGlassPanel(hudCtx, turnPillX, turnPillY, turnPillW, turnPillH, 25, '#1E3328', 0.86);
 
@@ -2338,7 +2338,7 @@
       }
 
       // 3. BOTTOM-LEFT LANGKAHFIT CRISP TYPOGRAPHIC SPEED, POWER & 4-COLUMN STRIP
-      const overlayX = 32;
+      const overlayX = 44;
 
       hudCtx.save();
       // Soft borderless radial backdrop gradient contained cleanly inside fillRect (zero hard edges)
@@ -2420,7 +2420,7 @@
       // 4. BOTTOM-RIGHT ROUNDED 2D MINI-MAP CARD
       const mapW = 224;
       const mapH = 198;
-      const mapX = w - 28 - mapW;
+      const mapX = w - 40 - mapW;
       const mapY = 428;
       const mapR = 18;
 
