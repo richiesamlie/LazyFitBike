@@ -31,7 +31,7 @@
     #fullmap-container {
       display: none;
       position: absolute;
-      top: 60px;
+      top: 16px;
       bottom: 74px;
       left: 310px;
       right: 14px;
@@ -2189,7 +2189,7 @@
 
       // 1. TOP-LEFT LANGKAHFIT STATUS PILL + ROUTE PROGRESS BAR
       const topPillX = 28;
-      const topPillY = 104;
+      const topPillY = 28;
       const topPillW = 472;
       const topPillH = 50;
       drawGlassPanel(hudCtx, topPillX, topPillY, topPillW, topPillH, 25, '#1E3328', 0.88);
@@ -2257,7 +2257,7 @@
         const pillW = 660;
         const pillH = 84;
         const pillX = 524;
-        const pillY = 104;
+        const pillY = 28;
         const isPulse = (state.workoutStepRemainingSec <= 3 || state.isWorkoutPaused) && Math.sin(now * 0.015) > 0;
         const borderColor = isPulse ? '#F43F5E' : '#C8F04A';
 
@@ -2321,7 +2321,7 @@
         const turnPillW = 312;
         const turnPillH = 50;
         const turnPillX = w - 28 - turnPillW;
-        const turnPillY = 104;
+        const turnPillY = 28;
         drawGlassPanel(hudCtx, turnPillX, turnPillY, turnPillW, turnPillH, 25, '#1E3328', 0.86);
 
         hudCtx.save();

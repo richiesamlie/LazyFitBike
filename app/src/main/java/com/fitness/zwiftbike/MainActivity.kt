@@ -37,7 +37,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -71,7 +70,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -454,6 +452,7 @@ fun LazyFitBikeCockpitScreen(
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var stravaAccessToken by remember { mutableStateOf("") }
     var aiWorkoutPrompt by remember { mutableStateOf("45 min sweet spot climbing session") }
+    var isMenuExpanded by remember { mutableStateOf(false) }
     val latestState by rememberUpdatedState(state)
 
     LaunchedEffect(state.activeRouteId, state.activeRoutePolylineJson) {
@@ -560,147 +559,16 @@ fun LazyFitBikeCockpitScreen(
                 .padding(10.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // TOP PERIMETER ROW
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(
+            // TOP WATCH CONNECTION STATUS BANNER (Only shown when waiting or signal lost)
+            if (state.connectionState == ConnectionState.WAITING_FOR_WATCH ||
+                state.connectionState == ConnectionState.SIGNAL_LOST
+            ) {
+                Box(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Left Quick Controls: Route Picker + Separate Sensor Mode Button (both >= 48dp touch target)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        // Route Pill (48dp height min)
-                        Row(
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(BgCarbonHud)
-                                .border(1.dp, BorderZinc, RoundedCornerShape(50))
-                                .clickable { onSetMapModalOpen(!state.isMapModalOpen) }
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            val dotColor = when (state.connectionState) {
-                                ConnectionState.LIVE_WATCH -> SignalEmerald
-                                ConnectionState.DEMO_MODE -> AccentLime
-                                ConnectionState.WAITING_FOR_WATCH,
-                                ConnectionState.SIGNAL_LOST -> SignalAmber
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .clip(CircleShape)
-                                    .background(dotColor)
-                            )
-                            Text(
-                                text = state.activeRouteName,
-                                color = TextPrimaryWhite,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.widthIn(max = 160.dp)
-                            )
-                        }
-
-                        // Sensor Mode Button (48dp x 48dp min)
-                        Button(
-                            onClick = onToggleSensorMode,
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .widthIn(min = 48.dp),
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = BgCarbonHud,
-                                contentColor = if (state.sensorMode == "WRIST") SignalRose else AccentLime
-                            ),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, BorderZinc),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = state.sensorMode,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                        }
-                    }
-
-                    // Center Live Mode Pill (Cam toggle, 48dp height min)
-                    Row(
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(BgCarbonHud)
-                            .border(1.dp, BorderZinc, RoundedCornerShape(50))
-                            .clickable(onClick = onCycleCamera)
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(7.dp)
-                    ) {
-                        Text(
-                            text = "CYCLING COCKPIT",
-                            color = AccentLime,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Black
-                        )
-                        Text(
-                            text = "·",
-                            color = TextMutedZinc,
-                            fontSize = 11.sp
-                        )
-                        Text(
-                            text = state.cameraMode,
-                            color = TextPrimaryWhite,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Right Quick Action Pill: Rec points + Quick Map button (48dp height min)
-                    Row(
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(BgCarbonHud)
-                            .border(1.dp, BorderZinc, RoundedCornerShape(50))
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "REC ${state.recordedTrackPointsCount} pts",
-                            style = TabularStyle,
-                            color = SignalEmerald,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Button(
-                            onClick = { onSetMapModalOpen(!state.isMapModalOpen) },
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .widthIn(min = 48.dp),
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.isMapModalOpen) AccentLime else BgControlDark,
-                                contentColor = if (state.isMapModalOpen) InkDark else TextPrimaryWhite
-                            ),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                        ) {
-                            Text(text = "Map", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                if (state.connectionState == ConnectionState.WAITING_FOR_WATCH ||
-                    state.connectionState == ConnectionState.SIGNAL_LOST
+                    contentAlignment = Alignment.Center
                 ) {
                     Row(
                         modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
                             .clip(RoundedCornerShape(50))
                             .background(BgCarbonHud)
                             .border(1.dp, SignalAmber, RoundedCornerShape(50))
@@ -736,6 +604,8 @@ fun LazyFitBikeCockpitScreen(
                         }
                     }
                 }
+            } else {
+                Spacer(modifier = Modifier.height(1.dp))
             }
 
             // CENTER MODALS (Map Modal, Strava Modal, or GitHub OTA Update Modal)
@@ -2235,168 +2105,161 @@ fun LazyFitBikeCockpitScreen(
                 verticalAlignment = Alignment.Bottom
             ) {
                 HudPod(modifier = Modifier.weight(1f, fill = false)) {
+                    val isDemoActive = state.connectionState == ConnectionState.DEMO_MODE
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Button(
-                            onClick = onToggleSensorMode,
+                            onClick = { isMenuExpanded = !isMenuExpanded },
                             modifier = Modifier.heightIn(min = 48.dp),
                             shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = BgControlDark,
-                                contentColor = TextPrimaryWhite
-                            )
+                                containerColor = if (isMenuExpanded) AccentLime else BgControlDark,
+                                contentColor = if (isMenuExpanded) InkDark else AccentLime
+                            ),
+                            border = if (isMenuExpanded) {
+                                null
+                            } else {
+                                androidx.compose.foundation.BorderStroke(1.dp, AccentLime)
+                            }
                         ) {
                             Text(
-                                text = "Mode: ${state.sensorMode}",
+                                text = if (isMenuExpanded) "Hide Menu" else "Menu",
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Black
                             )
                         }
 
-                        Button(
-                            onClick = { onSetProfileModalOpen(!state.isProfileModalOpen) },
-                            modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.isProfileModalOpen) AccentLime else BgControlDark,
-                                contentColor = if (state.isProfileModalOpen) InkDark else TextPrimaryWhite
+                        if (!isMenuExpanded) {
+                            CameraCycleButton(
+                                cameraMode = state.cameraMode,
+                                onCycleCamera = onCycleCamera
                             )
-                        ) {
-                            Text(
-                                text = "Profile",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Button(
-                            onClick = onCycleCamera,
-                            modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = BgControlDark,
-                                contentColor = TextPrimaryWhite
-                            )
-                        ) {
-                            Text(
-                                text = "Cam: ${state.cameraMode}",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Button(
-                            onClick = { onSetMapModalOpen(!state.isMapModalOpen) },
-                            modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.isMapModalOpen) AccentLime else BgControlDark,
-                                contentColor = if (state.isMapModalOpen) InkDark else TextPrimaryWhite
-                            )
-                        ) {
-                            Text(
-                                text = "Routes & Map",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Button(
-                            onClick = { onSetStravaModalOpen(!state.isStravaModalOpen) },
-                            modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.isStravaModalOpen) AccentLime else BgControlDark,
-                                contentColor = if (state.isStravaModalOpen) InkDark else TextPrimaryWhite
-                            )
-                        ) {
-                            Text(
-                                text = "Strava",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Button(
-                            onClick = { onSetUpdateModalOpen(!state.isUpdateModalOpen) },
-                            modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.isUpdateModalOpen) AccentLime else BgControlDark,
-                                contentColor = if (state.isUpdateModalOpen) InkDark else TextPrimaryWhite
-                            )
-                        ) {
-                            Text(
-                                text = "Update",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Button(
-                            onClick = { onSetWorkoutModalOpen(!state.isWorkoutModalOpen) },
-                            modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.isWorkoutModalOpen || state.isWorkoutActive) AccentLime else BgControlDark,
-                                contentColor = if (state.isWorkoutModalOpen || state.isWorkoutActive) InkDark else TextPrimaryWhite
-                            )
-                        ) {
-                            Text(
-                                text = if (state.isWorkoutActive) "Workout (Active)" else "Workout",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Button(
-                            onClick = onToggleDemo,
-                            modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.connectionState == ConnectionState.DEMO_MODE) {
-                                    AccentLime
-                                } else {
-                                    BgControlDark
-                                },
-                                contentColor = if (state.connectionState == ConnectionState.DEMO_MODE) {
-                                    InkDark
-                                } else {
-                                    TextPrimaryWhite
-                                }
-                            )
-                        ) {
-                            Text(
-                                text = if (state.connectionState == ConnectionState.DEMO_MODE) "Demo: ON" else "Demo",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        if (state.connectionState == ConnectionState.DEMO_MODE) {
-                            Column(
-                                modifier = Modifier
-                                    .width(105.dp)
-                                    .padding(horizontal = 2.dp)
+                            if (isDemoActive) {
+                                DemoToggleAndSlider(
+                                    isDemoActive = true,
+                                    demoSliderEffort = state.demoSliderEffort,
+                                    onToggleDemo = onToggleDemo,
+                                    onDemoEffortChange = onDemoEffortChange
+                                )
+                            }
+                        } else {
+                            Button(
+                                onClick = { onSetMapModalOpen(!state.isMapModalOpen) },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(50),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (state.isMapModalOpen) AccentLime else BgControlDark,
+                                    contentColor = if (state.isMapModalOpen) InkDark else TextPrimaryWhite
+                                )
                             ) {
                                 Text(
-                                    text = "${state.demoSliderEffort.toInt()} RPM",
-                                    style = TabularStyle,
-                                    color = TextMutedZinc,
-                                    fontSize = 10.sp,
+                                    text = "Routes & Map",
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
-                                Slider(
-                                    value = state.demoSliderEffort,
-                                    onValueChange = onDemoEffortChange,
-                                    valueRange = 0f..130f,
-                                    colors = SliderDefaults.colors(
-                                        thumbColor = AccentLime,
-                                        activeTrackColor = AccentLime
-                                    )
+                            }
+
+                            Button(
+                                onClick = { onSetWorkoutModalOpen(!state.isWorkoutModalOpen) },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(50),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (state.isWorkoutModalOpen || state.isWorkoutActive) {
+                                        AccentLime
+                                    } else {
+                                        BgControlDark
+                                    },
+                                    contentColor = if (state.isWorkoutModalOpen || state.isWorkoutActive) {
+                                        InkDark
+                                    } else {
+                                        TextPrimaryWhite
+                                    }
+                                )
+                            ) {
+                                Text(
+                                    text = if (state.isWorkoutActive) "Workout (Active)" else "Workout",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            CameraCycleButton(
+                                cameraMode = state.cameraMode,
+                                onCycleCamera = onCycleCamera
+                            )
+
+                            Button(
+                                onClick = onToggleSensorMode,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(50),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = if (state.sensorMode == "WRIST") SignalRose else AccentLime
+                                )
+                            ) {
+                                Text(
+                                    text = "Mode: ${state.sensorMode}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Button(
+                                onClick = { onSetStravaModalOpen(!state.isStravaModalOpen) },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(50),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (state.isStravaModalOpen) AccentLime else BgControlDark,
+                                    contentColor = if (state.isStravaModalOpen) InkDark else TextPrimaryWhite
+                                )
+                            ) {
+                                Text(
+                                    text = "Strava · ${state.recordedTrackPointsCount} pts",
+                                    style = TabularStyle,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Button(
+                                onClick = { onSetProfileModalOpen(!state.isProfileModalOpen) },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(50),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (state.isProfileModalOpen) AccentLime else BgControlDark,
+                                    contentColor = if (state.isProfileModalOpen) InkDark else TextPrimaryWhite
+                                )
+                            ) {
+                                Text(
+                                    text = "Profile",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            DemoToggleAndSlider(
+                                isDemoActive = isDemoActive,
+                                demoSliderEffort = state.demoSliderEffort,
+                                onToggleDemo = onToggleDemo,
+                                onDemoEffortChange = onDemoEffortChange
+                            )
+
+                            Button(
+                                onClick = { onSetUpdateModalOpen(!state.isUpdateModalOpen) },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(50),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (state.isUpdateModalOpen) AccentLime else BgControlDark,
+                                    contentColor = if (state.isUpdateModalOpen) InkDark else TextPrimaryWhite
+                                )
+                            ) {
+                                Text(
+                                    text = "Update",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
@@ -2456,6 +2319,77 @@ fun LazyFitBikeCockpitScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CameraCycleButton(
+    cameraMode: String,
+    onCycleCamera: () -> Unit
+) {
+    Button(
+        onClick = onCycleCamera,
+        modifier = Modifier.heightIn(min = 48.dp),
+        shape = RoundedCornerShape(50),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = BgControlDark,
+            contentColor = TextPrimaryWhite
+        )
+    ) {
+        Text(
+            text = "Cam: $cameraMode",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun DemoToggleAndSlider(
+    isDemoActive: Boolean,
+    demoSliderEffort: Float,
+    onToggleDemo: () -> Unit,
+    onDemoEffortChange: (Float) -> Unit
+) {
+    Button(
+        onClick = onToggleDemo,
+        modifier = Modifier.heightIn(min = 48.dp),
+        shape = RoundedCornerShape(50),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (isDemoActive) AccentLime else BgControlDark,
+            contentColor = if (isDemoActive) InkDark else TextPrimaryWhite
+        )
+    ) {
+        Text(
+            text = if (isDemoActive) "Demo: ON" else "Demo",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+
+    if (isDemoActive) {
+        Column(
+            modifier = Modifier
+                .width(105.dp)
+                .padding(horizontal = 2.dp)
+        ) {
+            Text(
+                text = "${demoSliderEffort.toInt()} RPM",
+                style = TabularStyle,
+                color = TextMutedZinc,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Slider(
+                value = demoSliderEffort,
+                onValueChange = onDemoEffortChange,
+                valueRange = 0f..130f,
+                colors = SliderDefaults.colors(
+                    thumbColor = AccentLime,
+                    activeTrackColor = AccentLime
+                )
+            )
         }
     }
 }
