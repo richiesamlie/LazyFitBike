@@ -1,41 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  readTelemetryState,
+  SpectatorTelemetry,
+  writeTelemetrySample
+} from "@/lib/spectator-store";
 
 export const dynamic = "force-dynamic";
-
-interface SpectatorTelemetry {
-  riderName: string;
-  timestampMs: number;
-  powerWatts: number;
-  heartRateBpm: number;
-  cadenceRpm: number;
-  speedKmh: number;
-  distanceKm: number;
-  slopeGradePercent: number;
-  normalizedPowerWatts: number;
-  powerZone: number;
-  hrZone: number;
-  caloriesKcal: number;
-  routeName: string;
-  lat: number;
-  lon: number;
-  elevationMeters: number;
-  workoutActive: boolean;
-  workoutName: string;
-  workoutStepName: string;
-  workoutTargetWatts: number;
-  workoutRemainingSec: number;
-  receivedAtMs?: number;
-}
-
-// Global in-memory telemetry store for Edge/Serverless runtime
-let latestTelemetry: SpectatorTelemetry | null = null;
-const historyBuffer: Array<{ time: number; watts: number; bpm: number; speed: number }> = [];
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, User-Agent, X-LazyFit-Device"
 };
+
+const NO_STORE_HEADERS = {
+  ...CORS_HEADERS,
+  "Cache-Control": "no-cache, no-store, must-revalidate"
+};
+
+function finiteNum(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
 
 export async function OPTIONS() {
   return new NextResponse(null, {
@@ -45,61 +30,87 @@ export async function OPTIONS() {
 }
 
 export async function GET() {
-  const now = Date.now();
-  const isLive = latestTelemetry != null && now - (latestTelemetry.receivedAtMs ?? 0) < 12000;
+  try {
+    const now = Date.now();
+    const state = await readTelemetryState();
+    const isLive =
+      state.latestTelemetry != null &&
+      now - (state.latestTelemetry.receivedAtMs ?? 0) < 12000;
 
-  return NextResponse.json(
-    {
-      live: isLive,
-      telemetry: latestTelemetry,
-      history: historyBuffer.slice(-60),
-      serverTime: now
-    },
-    {
-      status: 200,
-      headers: {
-        ...CORS_HEADERS,
-        "Cache-Control": "no-cache, no-store, must-revalidate"
+    return NextResponse.json(
+      {
+        live: isLive,
+        telemetry: state.latestTelemetry,
+        history: state.history.slice(-60),
+        serverTime: now
+      },
+      {
+        status: 200,
+        headers: NO_STORE_HEADERS
       }
-    }
-  );
+    );
+  } catch (err: unknown) {
+    console.error("GET /api/telemetry failed:", err);
+    return NextResponse.json(
+      { error: "Failed to read telemetry" },
+      { status: 500, headers: NO_STORE_HEADERS }
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body: SpectatorTelemetry = await req.json();
-    const now = Date.now();
+    const raw = (await req.json()) as Partial<SpectatorTelemetry> | null;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return NextResponse.json(
+        { error: "Invalid telemetry payload" },
+        { status: 400, headers: CORS_HEADERS }
+      );
+    }
 
-    latestTelemetry = {
-      ...body,
-      receivedAtMs: now
+    const now = Date.now();
+    const sanitized: SpectatorTelemetry = {
+      riderName: typeof raw.riderName === "string" && raw.riderName.trim() ? raw.riderName.trim() : "LazyFit Cyclist",
+      timestampMs: finiteNum(raw.timestampMs, now),
+      powerWatts: finiteNum(raw.powerWatts),
+      heartRateBpm: finiteNum(raw.heartRateBpm),
+      cadenceRpm: finiteNum(raw.cadenceRpm),
+      speedKmh: finiteNum(raw.speedKmh),
+      distanceKm: finiteNum(raw.distanceKm),
+      slopeGradePercent: finiteNum(raw.slopeGradePercent),
+      normalizedPowerWatts: finiteNum(raw.normalizedPowerWatts),
+      powerZone: finiteNum(raw.powerZone, 1),
+      hrZone: finiteNum(raw.hrZone, 1),
+      caloriesKcal: finiteNum(raw.caloriesKcal),
+      routeName: typeof raw.routeName === "string" && raw.routeName.trim() ? raw.routeName.trim() : "Watopia Flat",
+      lat: finiteNum(raw.lat),
+      lon: finiteNum(raw.lon),
+      elevationMeters: finiteNum(raw.elevationMeters),
+      workoutActive: Boolean(raw.workoutActive),
+      workoutName: typeof raw.workoutName === "string" ? raw.workoutName : "",
+      workoutStepName: typeof raw.workoutStepName === "string" ? raw.workoutStepName : "",
+      workoutTargetWatts: finiteNum(raw.workoutTargetWatts),
+      workoutRemainingSec: finiteNum(raw.workoutRemainingSec)
     };
 
-    historyBuffer.push({
-      time: now,
-      watts: body.powerWatts ?? 0,
-      bpm: body.heartRateBpm ?? 0,
-      speed: body.speedKmh ?? 0
-    });
-
-    if (historyBuffer.length > 300) {
-      historyBuffer.shift();
-    }
+    await writeTelemetrySample(sanitized, now);
 
     return NextResponse.json(
       {
         ok: true,
         receivedAt: now,
-        rider: body.riderName ?? "LazyFit Cyclist"
+        rider: sanitized.riderName
       },
       {
         status: 200,
-        headers: CORS_HEADERS
+        headers: NO_STORE_HEADERS
       }
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
+    console.error("POST /api/telemetry failed:", err);
+    const details = err instanceof Error ? err.message : undefined;
     return NextResponse.json(
-      { error: "Invalid telemetry payload", details: err?.message },
+      { error: "Invalid telemetry payload", details },
       { status: 400, headers: CORS_HEADERS }
     );
   }

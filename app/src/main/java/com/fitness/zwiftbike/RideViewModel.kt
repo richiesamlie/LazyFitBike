@@ -103,6 +103,8 @@ data class RideUiState(
     val statusBannerMessage: String = "",
     val aiCoachDebrief: String = "",
     val spectatorEndpointUrl: String = "",
+    val spectatorConnectionStatus: String = "",
+    val isSpectatorConnected: Boolean? = null,
     val googleMapsApiKey: String = "",
     val mapCenterTriggerId: Long = 0L,
     val mapCenterLat: Double = 0.0,
@@ -183,6 +185,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
     private var elapsedAccumulatorSec: Float = 0f
     private var workoutAccumulatorSec: Float = 0f
     private var lastWorkoutTickSec: Int = -1
+    private var lastIdleSpectatorHeartbeatMs: Long = 0L
 
     private val bots = listOf(
         PacerBot("Bot A", 1.8f, 7.2f, 40f),
@@ -256,7 +259,11 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         val restHr = prefs.getInt("restingHr", 60).coerceIn(35, 100)
         val maxHrVal = prefs.getInt("maxHr", 190).coerceIn(130, 230)
         val age = prefs.getInt("riderAge", 30).coerceIn(12, 95)
-        val specUrl = prefs.getString("spectatorEndpointUrl", "") ?: ""
+        val rawSpecUrl = prefs.getString("spectatorEndpointUrl", "") ?: ""
+        val specUrl = TelemetryBroadcaster.normalizeEndpointUrl(rawSpecUrl)
+        if (rawSpecUrl.isNotBlank() && specUrl.isNotBlank() && specUrl != rawSpecUrl) {
+            prefs.edit().putString("spectatorEndpointUrl", specUrl).apply()
+        }
         val savedGmpKey = prefs.getString("googleMapsApiKey", "") ?: ""
         if (savedGmpKey.isNotBlank()) {
             GpsRouteEngine.googleMapsApiKey = savedGmpKey
@@ -277,6 +284,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
             maxHr = maxHrVal,
             riderAge = age,
             spectatorEndpointUrl = specUrl,
+            spectatorConnectionStatus = if (specUrl.isNotBlank()) "Ready ($specUrl)" else "",
             googleMapsApiKey = savedGmpKey
         )
     }
@@ -434,11 +442,12 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                 val wPaused = wp?.isPaused ?: false
                 val wName = wp?.workout?.name ?: ""
 
-                // Live Spectator Telemetry Broadcasting (Vercel companion or local spectator endpoint)
-                if (didTickWholeSec && _uiState.value.spectatorEndpointUrl.isNotBlank()) {
-                    val packet = SpectatorPacket(
-                        riderName = "LazyFit Cyclist",
-                        timestampMs = nowMs,
+                // Live Spectator Telemetry Broadcasting (1 Hz while moving, 5s keep-alive while idle)
+                val spectatorUrl = _uiState.value.spectatorEndpointUrl
+                if (spectatorUrl.isNotBlank() && (didTickWholeSec || nowMs - lastIdleSpectatorHeartbeatMs >= 5000L)) {
+                    lastIdleSpectatorHeartbeatMs = nowMs
+                    val packet = buildSpectatorPacket(
+                        nowMs = nowMs,
                         powerWatts = wRounded,
                         heartRateBpm = inputBpm,
                         cadenceRpm = stepResult.effectiveRpm.roundToInt(),
@@ -459,15 +468,7 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
                         workoutTargetWatts = wTargetWatts,
                         workoutRemainingSec = wRemaining
                     )
-                    TelemetryBroadcaster.broadcastAsync(
-                        scope = viewModelScope,
-                        spectatorEndpoint = _uiState.value.spectatorEndpointUrl,
-                        packet = packet,
-                        onCheerReceived = { cheerMsg ->
-                            tonePlayer.playStepTransitionChime()
-                            _uiState.update { it.copy(statusBannerMessage = cheerMsg) }
-                        }
-                    )
+                    dispatchSpectatorPacket(spectatorUrl, packet, bypassThrottle = false)
                 }
 
                 _uiState.update { latest ->
@@ -1564,16 +1565,140 @@ class RideViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun buildSpectatorPacket(
+        nowMs: Long,
+        powerWatts: Int,
+        heartRateBpm: Int,
+        cadenceRpm: Int,
+        speedKmh: Float,
+        distanceKm: Float,
+        slopeGradePercent: Float,
+        normalizedPowerWatts: Int,
+        powerZone: Int,
+        hrZone: Int,
+        caloriesKcal: Int,
+        routeName: String,
+        lat: Double,
+        lon: Double,
+        elevationMeters: Double,
+        workoutActive: Boolean,
+        workoutName: String,
+        workoutStepName: String,
+        workoutTargetWatts: Int,
+        workoutRemainingSec: Int
+    ) = SpectatorPacket(
+        riderName = "LazyFit Cyclist",
+        timestampMs = nowMs,
+        powerWatts = powerWatts,
+        heartRateBpm = heartRateBpm,
+        cadenceRpm = cadenceRpm,
+        speedKmh = speedKmh,
+        distanceKm = distanceKm,
+        slopeGradePercent = slopeGradePercent,
+        normalizedPowerWatts = normalizedPowerWatts,
+        powerZone = powerZone,
+        hrZone = hrZone,
+        caloriesKcal = caloriesKcal,
+        routeName = routeName,
+        lat = lat,
+        lon = lon,
+        elevationMeters = elevationMeters,
+        workoutActive = workoutActive,
+        workoutName = workoutName,
+        workoutStepName = workoutStepName,
+        workoutTargetWatts = workoutTargetWatts,
+        workoutRemainingSec = workoutRemainingSec
+    )
+
+    private fun dispatchSpectatorPacket(
+        endpoint: String,
+        packet: SpectatorPacket,
+        bypassThrottle: Boolean
+    ) {
+        TelemetryBroadcaster.broadcastAsync(
+            scope = viewModelScope,
+            spectatorEndpoint = endpoint,
+            packet = packet,
+            bypassThrottle = bypassThrottle,
+            onCheerReceived = { cheerMsg ->
+                tonePlayer.playStepTransitionChime()
+                _uiState.update { it.copy(statusBannerMessage = cheerMsg) }
+            },
+            onDiagnostics = { result ->
+                if (result.errorMessage == "Throttled") return@broadcastAsync
+                _uiState.update { latest ->
+                    if (latest.spectatorEndpointUrl != endpoint) {
+                        latest
+                    } else if (result.success) {
+                        latest.copy(
+                            isSpectatorConnected = true,
+                            spectatorConnectionStatus = "Connected (HTTP ${result.httpCode})"
+                        )
+                    } else {
+                        latest.copy(
+                            isSpectatorConnected = false,
+                            spectatorConnectionStatus = "Connection failed: ${result.errorMessage ?: "HTTP ${result.httpCode}"}"
+                        )
+                    }
+                }
+            }
+        )
+    }
+
     fun setSpectatorEndpointUrl(url: String) {
-        val cleanUrl = url.trim()
+        val raw = url.trim()
+        val normalized = TelemetryBroadcaster.normalizeEndpointUrl(raw)
+        if (raw.isNotEmpty() && normalized.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    isSpectatorConnected = false,
+                    spectatorConnectionStatus = "Invalid URL. Enter e.g. your-app.vercel.app",
+                    statusBannerMessage = "Invalid Live Spectator URL"
+                )
+            }
+            return
+        }
+
         val prefs = getApplication<Application>()
             .getSharedPreferences("lazyfitbike_rider_profile", Context.MODE_PRIVATE)
-        prefs.edit().putString("spectatorEndpointUrl", cleanUrl).apply()
+        prefs.edit().putString("spectatorEndpointUrl", normalized).apply()
+
+        val nowMs = System.currentTimeMillis()
+        lastIdleSpectatorHeartbeatMs = nowMs
         _uiState.update {
             it.copy(
-                spectatorEndpointUrl = cleanUrl,
-                statusBannerMessage = if (cleanUrl.isNotEmpty()) "Live Spectator URL: $cleanUrl" else "Spectator broadcast disabled"
+                spectatorEndpointUrl = normalized,
+                isSpectatorConnected = null,
+                spectatorConnectionStatus = if (normalized.isNotEmpty()) "Connecting to $normalized..." else "",
+                statusBannerMessage = if (normalized.isNotEmpty()) "Live Spectator URL: $normalized" else "Spectator broadcast disabled"
             )
+        }
+
+        if (normalized.isNotEmpty()) {
+            val current = _uiState.value
+            val packet = buildSpectatorPacket(
+                nowMs = nowMs,
+                powerWatts = current.watts,
+                heartRateBpm = current.bpm,
+                cadenceRpm = current.rpm,
+                speedKmh = current.speedKmh,
+                distanceKm = current.distanceKm,
+                slopeGradePercent = current.slopeGradePercent,
+                normalizedPowerWatts = current.watts,
+                powerZone = current.powerZone,
+                hrZone = current.hrZone,
+                caloriesKcal = current.caloriesKcal,
+                routeName = current.activeRouteName,
+                lat = current.currentLat,
+                lon = current.currentLon,
+                elevationMeters = current.currentEleMeters,
+                workoutActive = current.isWorkoutActive,
+                workoutName = current.workoutName,
+                workoutStepName = current.workoutStepName,
+                workoutTargetWatts = current.workoutTargetWatts,
+                workoutRemainingSec = current.workoutStepRemainingSec
+            )
+            dispatchSpectatorPacket(normalized, packet, bypassThrottle = true)
         }
     }
 

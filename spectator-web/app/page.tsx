@@ -57,7 +57,7 @@ export default function SpectatorPage() {
     const poll = async () => {
       if (demoMode) return;
       try {
-        const res = await fetch("/api/telemetry");
+        const res = await fetch("/api/telemetry", { cache: "no-store" });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }

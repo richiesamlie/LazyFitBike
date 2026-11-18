@@ -1375,14 +1375,61 @@ fun LazyFitBikeCockpitScreen(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         // Spectator URL Configuration
-                        OutlinedTextField(
-                            value = spectatorUrlInput,
-                            onValueChange = { spectatorUrlInput = it.trim() },
-                            label = { Text("Live Spectator URL (Vercel / Next.js)", fontSize = 10.sp) },
-                            placeholder = { Text("https://spectator.vercel.app/api/telemetry", fontSize = 10.sp) },
-                            singleLine = true,
-                            colors = lazyFitTextFieldColors(),
-                            modifier = Modifier.fillMaxWidth()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = spectatorUrlInput,
+                                onValueChange = { spectatorUrlInput = it.trim() },
+                                label = { Text("Live Spectator URL (Vercel / Next.js)", fontSize = 10.sp) },
+                                placeholder = { Text("https://your-app.vercel.app/api/telemetry", fontSize = 10.sp) },
+                                singleLine = true,
+                                colors = lazyFitTextFieldColors(),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Button(
+                                onClick = { onSetSpectatorUrl(spectatorUrlInput) },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BgControlDark,
+                                    contentColor = AccentLime
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, AccentLime)
+                            ) {
+                                Text("Test", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
+
+                        val resolvedPreview = TelemetryBroadcaster.normalizeEndpointUrl(spectatorUrlInput)
+                        val showingSavedUrl = spectatorUrlInput.isNotBlank() && resolvedPreview == state.spectatorEndpointUrl
+                        val specStatusText = when {
+                            showingSavedUrl && state.spectatorConnectionStatus.isNotBlank() ->
+                                "${state.spectatorConnectionStatus} · $resolvedPreview"
+                            spectatorUrlInput.isNotBlank() && resolvedPreview.isNotBlank() ->
+                                "Endpoint: $resolvedPreview"
+                            spectatorUrlInput.isNotBlank() ->
+                                "Invalid URL. Enter e.g. your-app.vercel.app"
+                            state.spectatorConnectionStatus.isNotBlank() ->
+                                state.spectatorConnectionStatus
+                            else ->
+                                "Accepts Vercel domain or full .../api/telemetry URL"
+                        }
+                        val specStatusColor = when {
+                            showingSavedUrl && state.isSpectatorConnected == true -> SignalEmerald
+                            showingSavedUrl && state.isSpectatorConnected == false -> SignalRose
+                            spectatorUrlInput.isNotBlank() && resolvedPreview.isBlank() -> SignalRose
+                            !showingSavedUrl && state.isSpectatorConnected == false && spectatorUrlInput.isBlank() -> SignalRose
+                            else -> TextMutedZinc
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = specStatusText,
+                            color = specStatusColor,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -1398,7 +1445,9 @@ fun LazyFitBikeCockpitScreen(
                                     ageInput.toIntOrNull() ?: state.riderAge
                                 )
                                 onSetSpectatorUrl(spectatorUrlInput)
-                                onSetProfileModalOpen(false)
+                                if (spectatorUrlInput.isBlank() || resolvedPreview.isNotBlank()) {
+                                    onSetProfileModalOpen(false)
+                                }
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
