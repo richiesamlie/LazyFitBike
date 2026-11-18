@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 interface Telemetry {
   riderName: string;
@@ -27,15 +27,15 @@ interface Telemetry {
 }
 
 const ZONE_COLORS: Record<number, string> = {
-  1: "#94A3B8", // Zone 1 Gray - Active Recovery
-  2: "#38BDF8", // Zone 2 Blue - Endurance
-  3: "#34D399", // Zone 3 Green - Tempo
-  4: "#F97316", // Zone 4 Orange - Threshold
-  5: "#F43F5E"  // Zone 5 Red - VO2 Max / Anaerobic
+  1: "#94A3B8",
+  2: "#38BDF8",
+  3: "#34D399",
+  4: "#FBBF24",
+  5: "#FB7185"
 };
 
 const ZONE_NAMES: Record<number, string> = {
-  1: "Z1 Active Recovery",
+  1: "Z1 Recovery",
   2: "Z2 Endurance",
   3: "Z3 Tempo",
   4: "Z4 Threshold",
@@ -45,78 +45,89 @@ const ZONE_NAMES: Record<number, string> = {
 export default function SpectatorPage() {
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
   const [isLive, setIsLive] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
-  const [cheers, setCheers] = useState<Array<{ id: string; message: string; sender: string }>>([]);
-  const [cheerNotice, setCheerNotice] = useState<string | null>(null);
+  const [cheerNotice, setCheerNotice] = useState<{ text: string; isError: boolean } | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Poll live telemetry from /api/telemetry every 1000ms
   useEffect(() => {
-    let timer: NodeJS.Timeout;
+    let active = true;
 
     const poll = async () => {
       if (demoMode) return;
       try {
         const res = await fetch("/api/telemetry");
-        if (res.ok) {
-          const data = await res.json();
-          setIsLive(data.live);
-          if (data.telemetry) {
-            setTelemetry(data.telemetry);
-          }
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        if (!active) return;
+        setFetchError(null);
+        setIsLive(Boolean(data.live));
+        if (data.telemetry) {
+          setTelemetry(data.telemetry);
         }
       } catch {
-        // Offline or connection drop
+        if (!active) return;
+        setFetchError("Telemetry endpoint unreachable. Check your server connection or preview with Simulate Ride.");
+      } finally {
+        if (active) setIsLoading(false);
       }
     };
 
     poll();
-    timer = setInterval(poll, 1000);
-    return () => clearInterval(timer);
+    const timer = setInterval(poll, 1000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
   }, [demoMode]);
 
-  // Demo simulation mode when rider is not connected
   useEffect(() => {
     if (!demoMode) return;
+    setIsLoading(false);
+    setFetchError(null);
     setIsLive(true);
 
     let sec = 0;
-    const interval = setInterval(() => {
+    const emitDemoSample = () => {
       sec++;
-      const baseWatts = 220 + Math.sin(sec * 0.2) * 45;
-      const baseBpm = 145 + Math.sin(sec * 0.1) * 15;
-      const baseRpm = 88 + Math.cos(sec * 0.3) * 6;
-      const grade = 2.0 + Math.sin(sec * 0.05) * 3.5;
+      const baseWatts = 225 + Math.sin(sec * 0.2) * 42;
+      const baseBpm = 148 + Math.sin(sec * 0.1) * 12;
+      const baseRpm = 88 + Math.cos(sec * 0.3) * 5;
+      const grade = 2.4 + Math.sin(sec * 0.05) * 3.2;
 
       setTelemetry({
-        riderName: "Richie (Demo Live)",
+        riderName: "LazyFit Cyclist (Simulated)",
         timestampMs: Date.now(),
         powerWatts: Math.round(baseWatts),
         heartRateBpm: Math.round(baseBpm),
         cadenceRpm: Math.round(baseRpm),
-        speedKmh: 34.2 + (baseWatts - 200) * 0.06,
-        distanceKm: 8.4 + sec * 0.009,
+        speedKmh: 34.4 + (baseWatts - 200) * 0.06,
+        distanceKm: 6.2 + sec * 0.0095,
         slopeGradePercent: parseFloat(grade.toFixed(1)),
-        normalizedPowerWatts: 238,
+        normalizedPowerWatts: 234,
         powerZone: baseWatts > 250 ? 4 : 3,
         hrZone: baseBpm > 155 ? 4 : 3,
-        caloriesKcal: 280 + Math.round(sec * 0.25),
-        routeName: "Watopia Hilly Route",
-        lat: -11.645 + sec * 0.0001,
-        lon: 166.953 + sec * 0.0001,
-        elevationMeters: 142 + Math.sin(sec * 0.1) * 35,
+        caloriesKcal: 245 + Math.round(sec * 0.25),
+        routeName: "Kintamani Bali Climb",
+        lat: -8.282,
+        lon: 115.367,
+        elevationMeters: 1140 + Math.sin(sec * 0.1) * 38,
         workoutActive: true,
         workoutName: "Sweet Spot 2x20",
         workoutStepName: "Sweet Spot Block 1",
-        workoutTargetWatts: 240,
+        workoutTargetWatts: 235,
         workoutRemainingSec: Math.max(0, 600 - sec)
       });
-    }, 1000);
+    };
 
+    emitDemoSample();
+    const interval = setInterval(emitDemoSample, 1000);
     return () => clearInterval(interval);
   }, [demoMode]);
 
-  // Render elevation & course canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -127,304 +138,340 @@ export default function SpectatorPage() {
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    // Grid lines
-    ctx.strokeStyle = "#1F2937";
+    // Subtle elevation baseline ticks
+    ctx.strokeStyle = "rgba(30, 51, 40, 0.7)";
     ctx.lineWidth = 1;
-    for (let y = 20; y < h; y += 30) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
-    }
-
-    // Synthetic profile curve
     ctx.beginPath();
-    ctx.strokeStyle = "#F97316";
+    ctx.moveTo(0, h - 28);
+    ctx.lineTo(w, h - 28);
+    ctx.stroke();
+
+    // Topographical profile curve
+    ctx.beginPath();
+    ctx.strokeStyle = "#C8F04A";
     ctx.lineWidth = 3;
-    const points: [number, number][] = [];
     for (let x = 0; x <= w; x += 10) {
-      const ele = Math.sin(x * 0.02) * 25 + Math.cos(x * 0.008) * 15 + h / 2;
-      points.push([x, ele]);
+      const ele = Math.sin(x * 0.018) * 26 + Math.cos(x * 0.007) * 18 + h * 0.52;
       if (x === 0) ctx.moveTo(x, ele);
       else ctx.lineTo(x, ele);
     }
     ctx.stroke();
 
-    // Area fill gradient
+    // Forest gradient fill beneath elevation curve
     const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, "rgba(249, 115, 22, 0.35)");
-    grad.addColorStop(1, "rgba(249, 115, 22, 0.0)");
+    grad.addColorStop(0, "rgba(200, 240, 74, 0.28)");
+    grad.addColorStop(1, "rgba(31, 90, 58, 0.04)");
     ctx.fillStyle = grad;
     ctx.lineTo(w, h);
     ctx.lineTo(0, h);
     ctx.closePath();
     ctx.fill();
 
-    // Rider position beacon
-    const distRatio = telemetry ? (telemetry.distanceKm % 10) / 10 : 0.45;
-    const rx = distRatio * w;
-    const ry = Math.sin(rx * 0.02) * 25 + Math.cos(rx * 0.008) * 15 + h / 2;
+    // Live rider beacon
+    const distRatio = telemetry ? (telemetry.distanceKm % 10) / 10 : 0.4;
+    const rx = Math.max(36, Math.min(w - 36, distRatio * w));
+    const ry = Math.sin(rx * 0.018) * 26 + Math.cos(rx * 0.007) * 18 + h * 0.52;
 
-    // Glowing ring
     ctx.beginPath();
-    ctx.arc(rx, ry, 9, 0, Math.PI * 2);
+    ctx.arc(rx, ry, 8, 0, Math.PI * 2);
     ctx.fillStyle = "#34D399";
     ctx.fill();
-    ctx.strokeStyle = "#FFFFFF";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#0B1510";
+    ctx.lineWidth = 2.5;
     ctx.stroke();
 
-    // Rider tooltip
-    ctx.fillStyle = "#09090B";
-    ctx.fillRect(rx - 30, ry - 32, 60, 20);
-    ctx.strokeStyle = "#34D399";
-    ctx.strokeRect(rx - 30, ry - 32, 60, 20);
-    ctx.fillStyle = "#34D399";
-    ctx.font = "bold 10px monospace";
+    // Rider wattage pill on chart
+    const pillW = 68;
+    const pillH = 22;
+    const pillY = Math.max(10, ry - 34);
+    ctx.fillStyle = "#13221A";
+    ctx.fillRect(rx - pillW / 2, pillY, pillW, pillH);
+    ctx.strokeStyle = "#C8F04A";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(rx - pillW / 2, pillY, pillW, pillH);
+    ctx.fillStyle = "#C8F04A";
+    ctx.font = "bold 11px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(`${telemetry?.powerWatts || 0}W`, rx, ry - 18);
+    ctx.fillText(`${telemetry?.powerWatts ?? 0} W`, rx, pillY + 15);
   }, [telemetry]);
 
   const sendCheer = async (msg: string) => {
     try {
-      await fetch("/api/cheer", {
+      const res = await fetch("/api/cheer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sender: "Fan", message: msg })
+        body: JSON.stringify({ sender: "Spectator", message: msg })
       });
-      setCheerNotice(`Sent cheer: ${msg}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      setCheerNotice({ text: `Sent cheer to rider: ${msg}`, isError: false });
       setTimeout(() => setCheerNotice(null), 3000);
     } catch {
-      // Fallback
+      setCheerNotice({ text: "Could not deliver cheer. Verify /api/cheer is reachable.", isError: true });
     }
   };
 
-  const zoneColor = ZONE_COLORS[telemetry?.powerZone || 1] || "#71717A";
-  const zoneName = ZONE_NAMES[telemetry?.powerZone || 1] || "Z1 Active Recovery";
+  const toggleSimulation = () => {
+    if (demoMode) {
+      setDemoMode(false);
+      setIsLive(false);
+      setTelemetry(null);
+    } else {
+      setDemoMode(true);
+    }
+  };
+
+  const zoneColor = ZONE_COLORS[telemetry?.powerZone || 1] || "#94A3B8";
+  const zoneName = ZONE_NAMES[telemetry?.powerZone || 1] || "Z1 Recovery";
 
   return (
-    <main className="min-h-screen bg-[#09090B] text-zinc-100 p-4 md:p-8 flex flex-col items-center justify-start">
-      <div className="w-full max-w-5xl space-y-6">
-        {/* TOP BAR / BRAND HEADER */}
-        <header className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-zinc-800 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-orange-600 flex items-center justify-center font-black text-xl text-white shadow-lg shadow-orange-500/20">
-              ⚡
+    <main className="spectator-shell">
+      <div className="spectator-container">
+        <header className="spectator-header">
+          <div className="brand-group">
+            <div className="brand-mark" aria-hidden="true">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <circle cx="6.5" cy="16.5" r="3.5" stroke="#0B1510" strokeWidth="2.2" />
+                <circle cx="17.5" cy="16.5" r="3.5" stroke="#0B1510" strokeWidth="2.2" />
+                <path
+                  d="M6.5 16.5L10.5 8.5H15L17.5 16.5M10.5 8.5L12.5 13.5H17.5"
+                  stroke="#0B1510"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </div>
             <div>
-              <h1 className="text-xl md:text-2xl font-black tracking-tight flex items-center gap-2">
-                LAZYFITBIKE <span className="text-orange-500 font-mono text-sm font-semibold">SPECTATOR</span>
+              <h1 className="brand-title">
+                LazyFitBike
+                <span className="brand-tag">Spectator</span>
               </h1>
-              <p className="text-xs text-zinc-400">Live Telemetry &amp; Real-time Companion Stream</p>
+              <p className="brand-subtitle">
+                Live cycling telemetry, course elevation profile, and rider cheer channel
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* Live Indicator Pill */}
-            <div
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold ${
-                isLive
-                  ? "bg-emerald-950/80 border-emerald-500 text-emerald-400"
-                  : "bg-zinc-900 border-zinc-700 text-zinc-400"
-              }`}
-            >
-              <span
-                className={`w-2.5 h-2.5 rounded-full ${
-                  isLive ? "bg-emerald-400 animate-pulse" : "bg-zinc-600"
-                }`}
-              />
-              {isLive ? "LIVE BROADCAST" : "AWAITING RIDER"}
+          <div className="header-actions">
+            <div className={`status-pill ${isLive ? "status-pill-live" : ""}`}>
+              <span className={`status-dot ${isLive ? "status-dot-live" : ""}`} />
+              {isLive ? "LIVE STREAM" : "AWAITING RIDER"}
             </div>
 
-            {/* Demo Mode Switch */}
             <button
-              onClick={() => setDemoMode(!demoMode)}
-              className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-medium transition"
+              type="button"
+              onClick={toggleSimulation}
+              className={demoMode ? "btn-surface" : "btn-lime"}
             >
-              {demoMode ? "Exit Demo" : "Test Demo"}
+              {demoMode ? "Stop Simulation" : "Simulate Ride"}
             </button>
           </div>
         </header>
 
-        {/* WORKOUT INTERVAL CARD (If Workout Active) */}
-        {telemetry?.workoutActive && (
-          <div className="hud-pod p-4 border border-orange-500/40 bg-gradient-to-r from-orange-950/40 via-zinc-900/60 to-zinc-900/40 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">🔥</span>
-              <div>
-                <div className="text-xs text-orange-400 uppercase tracking-wider font-bold">
-                  {telemetry.workoutName || "Workout Active"}
-                </div>
-                <div className="text-base font-black text-white">{telemetry.workoutStepName}</div>
-              </div>
+        {isLoading && !telemetry && (
+          <section className="hud-pod state-banner" aria-live="polite">
+            <div>
+              <div className="state-title">Connecting to telemetry stream...</div>
+              <p className="state-desc">
+                Checking /api/telemetry for an active LazyFitBike rider session.
+              </p>
             </div>
-
-            <div className="flex items-center gap-6 font-mono">
-              <div>
-                <div className="text-[10px] text-zinc-400 uppercase">Target</div>
-                <div className="text-lg font-bold text-orange-400">{telemetry.workoutTargetWatts}W</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-zinc-400 uppercase">Remaining</div>
-                <div className="text-lg font-bold text-zinc-200">
-                  {Math.floor(telemetry.workoutRemainingSec / 60)}:
-                  {(telemetry.workoutRemainingSec % 60).toString().padStart(2, "0")}
-                </div>
-              </div>
-            </div>
-          </div>
+          </section>
         )}
 
-        {/* PRIMARY TELEMETRY GRID (4 HUD DIALS) */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {/* POWER POD */}
-          <div
-            className="hud-pod p-5 flex flex-col justify-between border-t-4 transition-all"
-            style={{ borderTopColor: zoneColor }}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Power</span>
-              <span
-                className="text-[10px] px-2 py-0.5 rounded font-black uppercase text-black"
-                style={{ backgroundColor: zoneColor }}
-              >
-                {zoneName.split(" ")[0]}
+        {fetchError && !demoMode && (
+          <section className="hud-pod state-banner state-banner-error" role="alert">
+            <div>
+              <div className="state-title">Stream Connection Unavailable</div>
+              <p className="state-desc">{fetchError}</p>
+            </div>
+            <button type="button" onClick={() => setDemoMode(true)} className="btn-lime">
+              Simulate Ride
+            </button>
+          </section>
+        )}
+
+        {!isLoading && !fetchError && !isLive && !telemetry && !demoMode && (
+          <section className="hud-pod state-banner">
+            <div>
+              <div className="state-title">No active bike stream connected</div>
+              <p className="state-desc">
+                Open Profile in the LazyFitBike Android app and set your Live Spectator URL, or start a live preview simulation.
+              </p>
+            </div>
+            <button type="button" onClick={() => setDemoMode(true)} className="btn-lime">
+              Simulate Ride
+            </button>
+          </section>
+        )}
+
+        <section className="cockpit-grid">
+          {/* LEFT FOCAL TELEMETRY PANEL */}
+          <div className="hud-pod hero-panel">
+            <div>
+              <div className="eyebrow-row">
+                <span className="rider-label">
+                  {telemetry?.riderName || "LazyFit Cyclist"}
+                </span>
+                <span className="zone-badge" style={{ backgroundColor: zoneColor }}>
+                  {zoneName}
+                </span>
+              </div>
+
+              <div className="hero-metrics-pair" style={{ marginTop: "1rem" }}>
+                <div>
+                  <span className="speed-figure tabular-nums">
+                    {telemetry ? telemetry.speedKmh.toFixed(1) : "0.0"}
+                  </span>
+                  <span className="speed-unit">km/h</span>
+                </div>
+
+                <div>
+                  <span className="power-figure tabular-nums">
+                    {telemetry?.powerWatts ?? 0}
+                  </span>
+                  <span className="power-unit">W</span>
+                  <div className="power-sub tabular-nums">
+                    Normalized Power: <strong>{telemetry?.normalizedPowerWatts ?? 0} W</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {telemetry?.workoutActive ? (
+              <div className="workout-strip">
+                <div>
+                  <div className="workout-name">{telemetry.workoutName || "Structured Workout"}</div>
+                  <div className="workout-step">{telemetry.workoutStepName}</div>
+                </div>
+                <div className="workout-targets tabular-nums">
+                  <div>
+                    <div className="target-label">Target</div>
+                    <div className="target-val">{telemetry.workoutTargetWatts} W</div>
+                  </div>
+                  <div>
+                    <div className="target-label">Remaining</div>
+                    <div className="target-val">
+                      {Math.floor(telemetry.workoutRemainingSec / 60)}:
+                      {(telemetry.workoutRemainingSec % 60).toString().padStart(2, "0")}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="workout-strip">
+                <div>
+                  <div className="workout-name">Free Ride Mode</div>
+                  <div className="workout-step">{telemetry?.routeName || "Select a route in app"}</div>
+                </div>
+                <div className="workout-targets tabular-nums">
+                  <div>
+                    <div className="target-label">Energy</div>
+                    <div className="target-val">{telemetry?.caloriesKcal ?? 0} kcal</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT COURSE ELEVATION & VITALS STAGE */}
+          <div className="hud-pod course-panel">
+            <div className="course-header">
+              <span className="course-title">Course Elevation &amp; Rider Beacon</span>
+              <span className="route-badge">
+                {telemetry?.routeName || "Awaiting Route"}
               </span>
             </div>
-            <div className="my-3">
-              <div className="text-5xl md:text-6xl font-black tracking-tight tabular-nums text-white">
-                {telemetry?.powerWatts ?? 0}
+
+            <div className="elevation-frame">
+              <canvas
+                ref={canvasRef}
+                width={640}
+                height={196}
+                className="elevation-canvas"
+                aria-label="Course elevation profile chart"
+              />
+            </div>
+
+            <div className="secondary-strip tabular-nums">
+              <div className="mini-stat">
+                <div className="mini-label">Distance</div>
+                <div className="mini-value">
+                  {telemetry ? telemetry.distanceKm.toFixed(2) : "0.00"} km
+                </div>
               </div>
-              <div className="text-xs font-mono text-zinc-400 mt-1">
-                NP: <span className="text-zinc-200 font-bold">{telemetry?.normalizedPowerWatts ?? 0}W</span>
+              <div className="mini-stat">
+                <div className="mini-label">Cadence</div>
+                <div className="mini-value mini-value-cadence">
+                  {telemetry?.cadenceRpm ?? 0} RPM
+                </div>
+              </div>
+              <div className="mini-stat">
+                <div className="mini-label">Heart Rate</div>
+                <div className="mini-value mini-value-hr">
+                  {telemetry?.heartRateBpm ?? 0} BPM
+                </div>
+              </div>
+              <div className="mini-stat">
+                <div className="mini-label">Elevation</div>
+                <div className="mini-value">
+                  {telemetry ? telemetry.elevationMeters.toFixed(0) : "0"} m
+                </div>
+              </div>
+              <div className="mini-stat">
+                <div className="mini-label">Grade</div>
+                <div className="mini-value">
+                  {telemetry ? `${telemetry.slopeGradePercent > 0 ? "+" : ""}${telemetry.slopeGradePercent.toFixed(1)}` : "0.0"}%
+                </div>
               </div>
             </div>
-            <div className="text-[11px] text-zinc-400 font-medium truncate">{zoneName}</div>
           </div>
+        </section>
 
-          {/* HEART RATE POD */}
-          <div className="hud-pod p-5 flex flex-col justify-between border-t-4 border-t-rose-500">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Heart Rate</span>
-              <span className="text-xs">❤️</span>
-            </div>
-            <div className="my-3">
-              <div className="text-5xl md:text-6xl font-black tracking-tight tabular-nums text-rose-400">
-                {telemetry?.heartRateBpm ?? 0}
-              </div>
-              <div className="text-xs font-mono text-zinc-400 mt-1">BPM</div>
-            </div>
-            <div className="text-[11px] text-zinc-400 font-medium">Zone {telemetry?.hrZone ?? 1} Cardiac Load</div>
-          </div>
-
-          {/* CADENCE POD */}
-          <div className="hud-pod p-5 flex flex-col justify-between border-t-4 border-t-emerald-400">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Cadence</span>
-              <span className="text-xs">🔄</span>
-            </div>
-            <div className="my-3">
-              <div className="text-5xl md:text-6xl font-black tracking-tight tabular-nums text-emerald-400">
-                {telemetry?.cadenceRpm ?? 0}
-              </div>
-              <div className="text-xs font-mono text-zinc-400 mt-1">RPM</div>
-            </div>
-            <div className="text-[11px] text-zinc-400 font-medium">
-              {telemetry && telemetry.cadenceRpm >= 85 && telemetry.cadenceRpm <= 95
-                ? "Optimal cadence"
-                : "Pedaling rhythm"}
-            </div>
-          </div>
-
-          {/* SPEED & DISTANCE POD */}
-          <div className="hud-pod p-5 flex flex-col justify-between border-t-4 border-t-orange-500">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Speed</span>
-              <span className="text-xs">🏁</span>
-            </div>
-            <div className="my-3">
-              <div className="text-5xl md:text-6xl font-black tracking-tight tabular-nums text-white">
-                {telemetry?.speedKmh?.toFixed(1) ?? "0.0"}
-              </div>
-              <div className="text-xs font-mono text-zinc-400 mt-1">KM/H</div>
-            </div>
-            <div className="text-[11px] text-zinc-400 font-mono">
-              {telemetry?.distanceKm?.toFixed(2) ?? "0.00"} km · {telemetry?.caloriesKcal ?? 0} kcal
-            </div>
-          </div>
-        </div>
-
-        {/* 3D/2D COURSE & ELEVATION VIEW */}
-        <div className="hud-pod p-5 space-y-3">
-          <div className="flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
-              <span className="font-bold uppercase tracking-wider text-zinc-300">Course Track &amp; Elevation</span>
-              <span className="px-2 py-0.5 rounded bg-zinc-800 text-orange-400 font-mono font-bold">
-                {telemetry?.routeName || "Watopia Course"}
-              </span>
-            </div>
-            <div className="font-mono text-zinc-400 flex items-center gap-3">
-              <span>Grade: <strong className="text-white">{telemetry?.slopeGradePercent ?? 0}%</strong></span>
-              <span>Ele: <strong className="text-white">{telemetry?.elevationMeters?.toFixed(0) ?? 0}m</strong></span>
-            </div>
-          </div>
-
-          <div className="relative w-full h-44 bg-zinc-950/80 rounded-lg overflow-hidden border border-zinc-800">
-            <canvas ref={canvasRef} width={900} height={176} className="w-full h-full block" />
-          </div>
-        </div>
-
-        {/* SPECTATOR CHEER / INTERACTIVE POD */}
-        <div className="hud-pod p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+        {/* CHEER INTERACTION BAR */}
+        <section className="hud-pod cheer-bar">
           <div>
-            <div className="text-sm font-bold text-white flex items-center gap-2">
-              <span>📣</span> Send Real-time Cheer to Rider
-            </div>
-            <p className="text-xs text-zinc-400">Send instant encouragement directly to the athlete&apos;s HUD.</p>
+            <div className="cheer-title">Send Live Rider Cheer</div>
+            <p className="cheer-subtitle">
+              Encouragements appear directly inside the rider&apos;s cockpit banner.
+            </p>
           </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => sendCheer("Ride On! 🚴‍♂️🔔")}
-              className="px-3.5 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 font-bold text-xs text-white transition flex items-center gap-1.5 shadow-md shadow-orange-600/20"
-            >
-              <span>🔔</span> Ride On!
+          <div className="cheer-actions">
+            <button type="button" onClick={() => sendCheer("Ride On!")} className="btn-lime">
+              Ride On
             </button>
-            <button
-              onClick={() => sendCheer("Sprint for the line! ⚡")}
-              className="px-3.5 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 font-bold text-xs text-zinc-200 border border-zinc-700 transition flex items-center gap-1.5"
-            >
-              <span>⚡</span> Sprint!
+            <button type="button" onClick={() => sendCheer("Hold Cadence!")} className="btn-surface">
+              Hold Cadence
             </button>
-            <button
-              onClick={() => sendCheer("Allez Allez! 🏆")}
-              className="px-3.5 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 font-bold text-xs text-zinc-200 border border-zinc-700 transition flex items-center gap-1.5"
-            >
-              <span>🏆</span> Allez!
+            <button type="button" onClick={() => sendCheer("Attack the Climb!")} className="btn-surface">
+              Attack the Climb
             </button>
           </div>
-        </div>
+        </section>
 
         {cheerNotice && (
-          <div className="p-3 bg-emerald-950 border border-emerald-500/60 rounded-lg text-emerald-300 text-xs text-center font-bold animate-fade-in">
-            {cheerNotice}
+          <div
+            className={`notice-bar ${cheerNotice.isError ? "notice-error" : ""}`}
+            role="status"
+            aria-live="polite"
+          >
+            {cheerNotice.text}
           </div>
         )}
 
-        {/* SETUP INSTRUCTIONS FOOTER */}
-        <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/30 text-xs text-zinc-400 space-y-1">
-          <div className="font-bold text-zinc-300">How to Connect LazyFitBike App:</div>
+        <footer className="setup-footer">
+          <div className="setup-heading">Connect LazyFitBike Android Cockpit</div>
           <p>
-            1. In LazyFitBike Android App, tap <strong>Profile</strong> &rarr; enter this spectator URL in{" "}
-            <strong>Live Spectator URL</strong>.
+            1. Open <strong>Profile</strong> in the LazyFitBike Android app and set{" "}
+            <strong>Live Spectator URL</strong> to{" "}
+            <code className="endpoint-code">https://&lt;your-project&gt;.vercel.app/api/telemetry</code>.
           </p>
           <p>
-            2. When deployed to Vercel, use your production endpoint:{" "}
-            <code className="text-orange-400 bg-zinc-950 px-1.5 py-0.5 rounded font-mono">
-              https://&lt;your-project&gt;.vercel.app/api/telemetry
-            </code>
+            2. Save profile to stream power, speed, cadence, heart rate, and route coordinates every second.
           </p>
-        </div>
+        </footer>
       </div>
     </main>
   );

@@ -10,8 +10,8 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: #09090B;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #0B1510;
+      font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       user-select: none;
       -webkit-user-select: none;
     }
@@ -36,11 +36,11 @@
       left: 310px;
       right: 14px;
       border-radius: 14px;
-      border: 2px solid #F97316;
-      background: #0F172A;
+      border: 2px solid #C8F04A;
+      background: #0B1510;
       overflow: hidden;
       z-index: 50;
-      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.75);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
     }
     #fullmap-canvas {
       width: 100%;
@@ -53,15 +53,51 @@
       bottom: 8px;
       left: 10px;
       right: 10px;
-      background: rgba(9, 9, 11, 0.90);
-      color: #F4F4F5;
-      border: 1px solid #27272A;
+      background: rgba(11, 21, 16, 0.92);
+      color: #F4F7F2;
+      border: 1px solid #1E3328;
       padding: 6px 12px;
-      border-radius: 8px;
+      border-radius: 10px;
       font-size: 11px;
       font-weight: 600;
       pointer-events: none;
       font-variant-numeric: tabular-nums;
+    }
+    #map-status-banner {
+      display: none;
+      position: absolute;
+      top: 62px;
+      left: 10px;
+      right: 10px;
+      z-index: 65;
+      background: rgba(11, 21, 16, 0.96);
+      color: #F4F7F2;
+      border: 1.5px solid #C8F04A;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    #map-status-banner.is-loading {
+      display: flex;
+      border-color: #C8F04A;
+      color: #C8F04A;
+    }
+    #map-status-banner.is-error {
+      display: flex;
+      border-color: #FB7185;
+      color: #F4F7F2;
+    }
+    #btn-retry-route {
+      display: none;
+      background: #C8F04A;
+      border-color: #C8F04A;
+      color: #0B1510;
+      flex-shrink: 0;
     }
     #map-controls {
       position: absolute;
@@ -72,18 +108,21 @@
       z-index: 60;
     }
     .map-btn {
-      background: rgba(9, 9, 11, 0.90);
-      color: #F4F4F5;
-      border: 1px solid #3F3F46;
-      border-radius: 8px;
-      padding: 6px 11px;
+      background: rgba(11, 21, 16, 0.92);
+      color: #F4F7F2;
+      border: 1px solid #1E3328;
+      border-radius: 10px;
+      padding: 6px 12px;
+      min-height: 44px;
+      min-width: 44px;
       font-size: 12px;
       font-weight: 800;
       cursor: pointer;
     }
     .map-btn:active {
-      background: #F97316;
-      border-color: #F97316;
+      background: #C8F04A;
+      border-color: #C8F04A;
+      color: #0B1510;
     }
     #fallback-2d-canvas {
       display: none;
@@ -106,13 +145,17 @@
   <div id="fullmap-container">
     <canvas id="fullmap-canvas"></canvas>
     <div id="map-controls">
-      <button class="map-btn" id="btn-locate-gps" type="button" style="background:#F97316;border-color:#F97316;color:#FFFFFF;">📍 My GPS</button>
-      <button class="map-btn" id="btn-zoom-in" type="button">＋</button>
-      <button class="map-btn" id="btn-zoom-out" type="button">－</button>
-      <button class="map-btn" id="btn-recenter" type="button">◎ Rider</button>
-      <button class="map-btn" id="btn-clear-pin" type="button">✕ Pin</button>
+      <button class="map-btn" id="btn-locate-gps" type="button" style="background:#C8F04A;border-color:#C8F04A;color:#0B1510;">My GPS</button>
+      <button class="map-btn" id="btn-zoom-in" type="button">+</button>
+      <button class="map-btn" id="btn-zoom-out" type="button">-</button>
+      <button class="map-btn" id="btn-recenter" type="button">Rider</button>
+      <button class="map-btn" id="btn-clear-pin" type="button">Clear Pin</button>
     </div>
-    <div id="map-hint">OpenStreetMap Live View: Tap '📍 My GPS', drag to pan, or tap any 2 points to build a road route.</div>
+    <div id="map-status-banner" role="status" aria-live="polite">
+      <span id="map-status-text"></span>
+      <button class="map-btn" id="btn-retry-route" type="button">Retry Route</button>
+    </div>
+    <div id="map-hint">OpenStreetMap Live View: Tap 'My GPS', drag to pan, or tap any 2 points to build a road route.</div>
   </div>
 
   <script>
@@ -170,7 +213,7 @@
       1: '#94A3B8', // Zone 1 Gray: Active Recovery
       2: '#38BDF8', // Zone 2 Blue: Endurance
       3: '#34D399', // Zone 3 Green: Tempo
-      4: '#F97316', // Zone 4 Orange: Threshold
+      4: '#FBBF24', // Zone 4 Amber: Threshold
       5: '#F43F5E'  // Zone 5 Red: VO2 Max / Anaerobic
     };
 
@@ -265,6 +308,7 @@
         if (Array.isArray(parsed) && parsed.length >= 2) {
           routeWaypoints = parsed;
           ensureRouteMetrics(routeWaypoints);
+          clearMapStatus();
           if (!tapStartLatLon) {
             mapViewLat = null;
             mapViewLon = null;
@@ -287,11 +331,11 @@
         tapStartLatLon = [nLat, nLon];
         if (mapHintEl) {
           mapHintEl.textContent =
-            '📍 Centered on your GPS (' + nLat.toFixed(4) + ', ' + nLon.toFixed(4) + ') as Start Pin! Tap any Destination on the map.';
+            'Centered on your GPS (' + nLat.toFixed(4) + ', ' + nLon.toFixed(4) + ') as Start Pin! Tap any Destination on the map.';
         }
       } else if (mapHintEl) {
         mapHintEl.textContent =
-          '📍 Centered on (' + nLat.toFixed(4) + ', ' + nLon.toFixed(4) + '). Tap Start Pin & Destination Pin.';
+          'Centered on (' + nLat.toFixed(4) + ', ' + nLon.toFixed(4) + '). Tap Start Pin & Destination Pin.';
       }
     };
 
@@ -382,11 +426,99 @@
     const fullMapCanvas = document.getElementById('fullmap-canvas');
     const fullMapCtx = fullMapCanvas.getContext('2d');
     const mapHintEl = document.getElementById('map-hint');
+    const mapStatusBannerEl = document.getElementById('map-status-banner');
+    const mapStatusTextEl = document.getElementById('map-status-text');
+    const btnRetryRouteEl = document.getElementById('btn-retry-route');
+    let pendingRouteCoords = null;
+    let routeRequestTimerId = null;
+
+    function setMapStatus(mode, text) {
+      if (!mapStatusBannerEl || !mapStatusTextEl || !btnRetryRouteEl) return;
+      mapStatusBannerEl.classList.remove('is-loading', 'is-error');
+      if (mode === 'loading') {
+        mapStatusTextEl.textContent = text;
+        btnRetryRouteEl.style.display = 'none';
+        mapStatusBannerEl.classList.add('is-loading');
+      } else if (mode === 'error') {
+        mapStatusTextEl.textContent = text;
+        btnRetryRouteEl.style.display = 'inline-block';
+        mapStatusBannerEl.classList.add('is-error');
+      } else {
+        mapStatusTextEl.textContent = '';
+        btnRetryRouteEl.style.display = 'none';
+      }
+    }
+
+    function clearMapStatus() {
+      if (routeRequestTimerId !== null) {
+        clearTimeout(routeRequestTimerId);
+        routeRequestTimerId = null;
+      }
+      pendingRouteCoords = null;
+      setMapStatus('hidden', '');
+    }
+
+    function triggerMapRouteRequest(sLat, sLon, dLat, dLon) {
+      if (routeRequestTimerId !== null) {
+        clearTimeout(routeRequestTimerId);
+        routeRequestTimerId = null;
+      }
+      pendingRouteCoords = { sLat: sLat, sLon: sLon, dLat: dLat, dLon: dLon };
+      const engineName = state.hasGoogleMapsKey ? 'Google Maps (Bicycle + Elevation)' : 'OSRM';
+      const loadingMsg = 'Computing ' + engineName + ' route to (' + dLat.toFixed(4) + ', ' + dLon.toFixed(4) + ')...';
+      if (mapHintEl) mapHintEl.textContent = loadingMsg;
+      setMapStatus('loading', loadingMsg);
+
+      let dispatched = false;
+      try {
+        if (window.AndroidBridge && window.AndroidBridge.onMapRouteRequested) {
+          window.AndroidBridge.onMapRouteRequested(sLat, sLon, dLat, dLon);
+          dispatched = true;
+        }
+      } catch (err) {
+        dispatched = false;
+      }
+
+      if (!dispatched && !window.AndroidBridge) {
+        routeRequestTimerId = setTimeout(function() {
+          routeRequestTimerId = null;
+          setMapStatus('error', 'Route request failed or timed out.');
+          if (mapHintEl) mapHintEl.textContent = 'Route request failed or timed out. Tap Retry Route or Clear Pin.';
+        }, 6000);
+        return;
+      }
+
+      if (!dispatched) {
+        setMapStatus('error', 'Route request failed or timed out.');
+        if (mapHintEl) mapHintEl.textContent = 'Route request failed or timed out. Tap Retry Route or Clear Pin.';
+        return;
+      }
+
+      routeRequestTimerId = setTimeout(function() {
+        routeRequestTimerId = null;
+        setMapStatus('error', 'Route request failed or timed out.');
+        if (mapHintEl) mapHintEl.textContent = 'Route request failed or timed out. Tap Retry Route or Clear Pin.';
+      }, 6000);
+    }
+
+    if (btnRetryRouteEl) {
+      btnRetryRouteEl.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        if (pendingRouteCoords) {
+          triggerMapRouteRequest(
+            pendingRouteCoords.sLat,
+            pendingRouteCoords.sLon,
+            pendingRouteCoords.dLat,
+            pendingRouteCoords.dLon
+          );
+        }
+      });
+    }
 
     document.getElementById('btn-locate-gps').addEventListener('click', function(ev) {
       ev.stopPropagation();
       if (mapHintEl) {
-        mapHintEl.textContent = '📍 Requesting your live GPS location...';
+        mapHintEl.textContent = 'Requesting your live GPS location...';
       }
       if (window.AndroidBridge && window.AndroidBridge.onLocateMeRequested) {
         window.AndroidBridge.onLocateMeRequested();
@@ -409,6 +541,7 @@
     document.getElementById('btn-clear-pin').addEventListener('click', function(ev) {
       ev.stopPropagation();
       tapStartLatLon = null;
+      clearMapStatus();
       if (mapHintEl) mapHintEl.textContent = defaultMapHintText();
     });
 
@@ -450,12 +583,12 @@
       img.onerror = function() {
         if (!img.triedFallback) {
           img.triedFallback = true;
-          img.src = 'https://a.basemaps.cartocdn.com/rastertiles/voyager/' + key + '.png';
+          img.src = 'https://a.tile.opentopomap.org/' + key + '.png';
         } else {
           img.failedAt = Date.now();
         }
       };
-      img.src = 'https://tile.openstreetmap.org/' + key + '.png';
+      img.src = 'https://a.tile-cyclosm.openstreetmap.fr/cyclosm/' + key + '.png';
       osmTileCache[key] = img;
       return img;
     }
@@ -465,7 +598,7 @@
       targetCtx.beginPath();
       targetCtx.rect(boxX, boxY, boxW, boxH);
       targetCtx.clip();
-      targetCtx.fillStyle = '#0f172a';
+      targetCtx.fillStyle = '#0B1510';
       targetCtx.fillRect(boxX, boxY, boxW, boxH);
 
       const viewLat = mapViewLat !== null ? mapViewLat : state.lat;
@@ -491,10 +624,10 @@
       }
 
       if (anyTileLoaded) {
-        targetCtx.fillStyle = 'rgba(15, 23, 42, 0.15)';
+        targetCtx.fillStyle = 'rgba(11, 21, 16, 0.14)';
         targetCtx.fillRect(boxX, boxY, boxW, boxH);
       } else {
-        targetCtx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
+        targetCtx.strokeStyle = 'rgba(169, 189, 176, 0.22)';
         targetCtx.lineWidth = 1;
         for (let gx = boxX; gx < boxX + boxW; gx += 28) {
           targetCtx.beginPath();
@@ -528,7 +661,7 @@
       if (routeWaypoints.length >= 2) {
         targetCtx.lineCap = 'round';
         targetCtx.lineJoin = 'round';
-        targetCtx.strokeStyle = 'rgba(9, 9, 11, 0.85)';
+        targetCtx.strokeStyle = 'rgba(11, 21, 16, 0.85)';
         targetCtx.lineWidth = 7;
         targetCtx.beginPath();
         for (let i = 0; i < routeWaypoints.length; i++) {
@@ -540,11 +673,11 @@
         }
         targetCtx.stroke();
 
-        targetCtx.strokeStyle = '#f97316';
+        targetCtx.strokeStyle = '#C8F04A';
         targetCtx.lineWidth = 4;
         targetCtx.stroke();
 
-        targetCtx.strokeStyle = '#10b981';
+        targetCtx.strokeStyle = '#34D399';
         targetCtx.lineWidth = 4.5;
         targetCtx.beginPath();
         for (let i = 0; i <= closestIdx; i++) {
@@ -561,38 +694,40 @@
       if (tapStartLatLon) {
         const sx = boxX + boxW * 0.5 + (lonToTileX(tapStartLatLon[1], zoom) - centerTileX) * 256;
         const sy = boxY + boxH * 0.5 + (latToTileY(tapStartLatLon[0], zoom) - centerTileY) * 256;
-        targetCtx.fillStyle = '#22c55e';
+        targetCtx.fillStyle = '#34D399';
         targetCtx.beginPath();
         targetCtx.arc(sx, sy, 7, 0, Math.PI * 2);
         targetCtx.fill();
-        targetCtx.strokeStyle = '#ffffff';
+        targetCtx.strokeStyle = '#F4F7F2';
         targetCtx.lineWidth = 2;
         targetCtx.stroke();
       }
 
-      const pulseRadius = 9 + (Math.sin(performance.now() * 0.008) + 1) * 4;
-      targetCtx.fillStyle = 'rgba(249, 115, 22, 0.35)';
+      targetCtx.fillStyle = 'rgba(200, 240, 74, 0.35)';
       targetCtx.beginPath();
-      targetCtx.arc(rx, ry, pulseRadius, 0, Math.PI * 2);
+      targetCtx.arc(rx, ry, 11, 0, Math.PI * 2);
       targetCtx.fill();
 
-      targetCtx.fillStyle = '#f97316';
+      targetCtx.fillStyle = '#C8F04A';
       targetCtx.beginPath();
       targetCtx.arc(rx, ry, 6, 0, Math.PI * 2);
       targetCtx.fill();
-      targetCtx.strokeStyle = '#ffffff';
+      targetCtx.strokeStyle = '#0B1510';
       targetCtx.lineWidth = 2;
       targetCtx.stroke();
 
-      targetCtx.fillStyle = 'rgba(9, 9, 11, 0.88)';
+      targetCtx.fillStyle = 'rgba(11, 21, 16, 0.90)';
       targetCtx.beginPath();
-      targetCtx.rect(boxX + 12, boxY + 12, 280, 28);
+      targetCtx.rect(boxX + 12, boxY + 12, 290, 28);
       targetCtx.fill();
-      targetCtx.fillStyle = '#f4f4f5';
+      targetCtx.strokeStyle = '#1E3328';
+      targetCtx.lineWidth = 1;
+      targetCtx.stroke();
+      targetCtx.fillStyle = '#F4F7F2';
       targetCtx.font = 'bold 11px sans-serif';
       targetCtx.textAlign = 'left';
       targetCtx.fillText(
-        'TACTICAL GPS: ' + state.speedKmh.toFixed(1) + ' km/h  |  ' +
+        'GPS LIVE: ' + state.speedKmh.toFixed(1) + ' km/h  |  ' +
         (state.distanceMeters / 1000).toFixed(2) + ' km  |  ' + state.watts + ' W',
         boxX + 20,
         boxY + 30
@@ -675,6 +810,7 @@
       const clickedLon = tileXToLon(clickedTileX, zoom);
 
       if (!tapStartLatLon) {
+        clearMapStatus();
         tapStartLatLon = [clickedLat, clickedLon];
         mapHintEl.textContent =
           'Start Pin set (' + clickedLat.toFixed(4) + ', ' + clickedLon.toFixed(4) + '). Tap Destination Pin.';
@@ -682,12 +818,7 @@
         const sLat = tapStartLatLon[0];
         const sLon = tapStartLatLon[1];
         tapStartLatLon = null;
-        const engineName = state.hasGoogleMapsKey ? 'Google Maps (Bicycle + Elevation)' : 'OSRM';
-        mapHintEl.textContent =
-          'Requesting ' + engineName + ' route to (' + clickedLat.toFixed(4) + ', ' + clickedLon.toFixed(4) + ')...';
-        if (window.AndroidBridge && window.AndroidBridge.onMapRouteRequested) {
-          window.AndroidBridge.onMapRouteRequested(sLat, sLon, clickedLat, clickedLon);
-        }
+        triggerMapRouteRequest(sLat, sLon, clickedLat, clickedLon);
       }
     });
 
@@ -701,12 +832,15 @@
     let contextLostListenerAttached = false;
 
     // Road & Environment objects
-    let roadMesh, roadTexture, groundMesh, skyDome;
-    let treesGroup, archMesh, archSignCtx, archSignTexture, botsGroup, bikeGroup;
+    let roadMesh, roadTexture, groundMesh, grassTexture, lakeMesh, lakeTexture, skyDome;
+    let stoneWallMesh, stoneWallTopMesh, stoneWallOuterMesh, stoneTexture;
+    let leftRailFaceMesh, leftRailTopMesh, rightRailFaceMesh, rightRailTopMesh;
+    let treesGroup, guardrailPostsGroup, archMesh, archSignCtx, archSignTexture, botsGroup, bikeGroup;
     let visorMesh, hudCanvas, hudCtx, hudTexture;
 
     // Avatar parts for articulation
-    let cyclistGroup, crankGroup, frontWheel, rearWheel;
+    let cyclistGroup, cyclistUpperBody, crankGroup, frontWheel, rearWheel;
+    let leftPedal = null, rightPedal = null;
     let leftLegData = null, rightLegData = null;
     const _upVec = new THREE.Vector3(0, 1, 0);
     const _tmpDir = new THREE.Vector3();
@@ -729,7 +863,7 @@
         renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.1;
+        renderer.toneMappingExposure = 0.96;
 
         if (!contextLostListenerAttached) {
           contextLostListenerAttached = true;
@@ -751,19 +885,22 @@
         }
 
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x09090b);
-        scene.fog = new THREE.FogExp2(0x0f172a, 0.009);
+        scene.background = new THREE.Color(0x8CC0E8);
+        scene.fog = new THREE.FogExp2(0xC8DFEE, 0.0014);
 
-        // Lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+        // Balanced Daylight Lighting for smooth form shading
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.46);
         scene.add(ambientLight);
 
-        const sunLight = new THREE.DirectionalLight(0xffedd5, 1.3);
-        sunLight.position.set(20, 45, 30);
+        const hemiLight = new THREE.HemisphereLight(0xE0F2FE, 0x264222, 0.44);
+        scene.add(hemiLight);
+
+        const sunLight = new THREE.DirectionalLight(0xFFF7ED, 1.18);
+        sunLight.position.set(35, 65, 25);
         scene.add(sunLight);
 
-        const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.5);
-        fillLight.position.set(-20, 20, -20);
+        const fillLight = new THREE.DirectionalLight(0x7DD3FC, 0.30);
+        fillLight.position.set(-30, 20, -25);
         scene.add(fillLight);
 
         // Camera rig
@@ -785,9 +922,9 @@
       }
     }
 
-    function sampleRouteAtDistance(distMeters) {
+    function sampleCoordAtDistance(distMeters) {
       if (!Array.isArray(routeWaypoints) || routeWaypoints.length < 2) {
-        return { lat: state.lat, lon: state.lon, ele: 0, bearingDeg: 0 };
+        return { lat: state.lat, lon: state.lon, ele: 0, segBearingDeg: 0, totalDist: 4000, wrappedDist: 0 };
       }
       if (routeWaypoints[0].length < 5) {
         ensureRouteMetrics(routeWaypoints);
@@ -818,21 +955,52 @@
       const lat = wp0[0] + (wp1[0] - wp0[0]) * t;
       const lon = wp0[1] + (wp1[1] - wp0[1]) * t;
       const ele = wp0[2] + (wp1[2] - wp0[2]) * t;
+      const segBearingDeg = segLen > 0.05
+        ? computeBearingDegJs(wp0[0], wp0[1], wp1[0], wp1[1])
+        : (Number(wp1[4]) || Number(wp0[4]) || 0);
 
-      const b0 = Number(wp0[4]) || 0;
-      const b1 = Number(wp1[4]) || b0;
-      const dB = shortestAngleDeg(b0, b1);
-      const bearingDeg = (b0 + dB * t + 360.0) % 360.0;
+      return {
+        lat: lat,
+        lon: lon,
+        ele: ele,
+        segBearingDeg: segBearingDeg,
+        totalDist: totalDist,
+        wrappedDist: d
+      };
+    }
 
-      return { lat: lat, lon: lon, ele: ele, bearingDeg: bearingDeg };
+    function sampleRouteAtDistance(distMeters) {
+      const pt = sampleCoordAtDistance(distMeters);
+      if (!Array.isArray(routeWaypoints) || routeWaypoints.length < 2) {
+        return { lat: pt.lat, lon: pt.lon, ele: pt.ele, bearingDeg: 0 };
+      }
+      // Symmetric local tangent over +-4m clamped inside [0, totalDist] prevents premature turn lead-in
+      // and avoids Kotlin/JS bearing index discrepancies
+      const dBack = Math.max(0, pt.wrappedDist - 4.0);
+      const dAhead = Math.min(pt.totalDist, pt.wrappedDist + 4.0);
+      const back = sampleCoordAtDistance(dBack);
+      const ahead = sampleCoordAtDistance(dAhead);
+      const hasSpan = Math.abs(ahead.lat - back.lat) + Math.abs(ahead.lon - back.lon) > 1e-7;
+      const bearingDeg = hasSpan
+        ? computeBearingDegJs(back.lat, back.lon, ahead.lat, ahead.lon)
+        : pt.segBearingDeg;
+
+      return { lat: pt.lat, lon: pt.lon, ele: pt.ele, bearingDeg: bearingDeg };
     }
 
     function projectRoadOffsetAhead(localDist, relD, pt0Override) {
-      if (relD <= 0.05) {
+      if (Math.abs(relD) <= 0.05) {
         return { curveX: 0, slopeY: 0 };
       }
+      if (relD < 0) {
+        const ptBack = sampleCoordAtDistance(localDist + 10);
+        const pt0 = pt0Override || sampleRouteAtDistance(localDist);
+        const dEle = ptBack.ele - pt0.ele;
+        const slopeRate = Math.abs(dEle) > 0.01 ? (dEle * 0.55) / 10.0 : (state.gradePercent * 0.006);
+        return { curveX: 0, slopeY: relD * slopeRate };
+      }
       const pt0 = pt0Override || sampleRouteAtDistance(localDist);
-      const pt1 = sampleRouteAtDistance(localDist + relD);
+      const pt1 = sampleCoordAtDistance(localDist + relD);
 
       const dNorth = (pt1.lat - pt0.lat) * 111132.0;
       const dEast = (pt1.lon - pt0.lon) * 111319.5 * Math.cos(pt0.lat * Math.PI / 180.0);
@@ -843,7 +1011,7 @@
 
       // If road turns past 90 degrees (hairpin/switchback), blend heading delta so it stays swept to the turn side
       const forwardZ = dEast * Math.sin(h0Rad) + dNorth * Math.cos(h0Rad);
-      const turnDeg = shortestAngleDeg(pt0.bearingDeg, pt1.bearingDeg);
+      const turnDeg = shortestAngleDeg(pt0.bearingDeg, pt1.segBearingDeg);
       if (forwardZ < relD * 0.35) {
         const sign = turnDeg >= 0 ? 1 : -1;
         lateralX = sign * Math.max(Math.abs(lateralX), relD * 0.42);
@@ -870,7 +1038,8 @@
 
       const activeDelta = Math.abs(delta35) >= 12 ? delta35 : delta75;
       const turnDist = Math.abs(delta35) >= 12 ? 35 : 75;
-      const turnRate = Math.max(-2.2, Math.min(2.2, delta35 / 22.0));
+      const blendDelta = Math.abs(delta35) >= Math.abs(delta75) * 0.45 ? delta35 : delta75 * 0.45;
+      const turnRate = Math.max(-2.2, Math.min(2.2, blendDelta / 22.0));
 
       if (Math.abs(activeDelta) >= 45) {
         return {
@@ -893,103 +1062,348 @@
       };
     }
 
-    // Sky Dome, Ground Terrain, Trees, & Banners
+    // Sky Dome Panorama, Contoured Hillside, Shimmering Lake, Continuous Guardrails, Trees & Banners
     function createEnvironment() {
-      // Sky Dome
-      const skyGeo = new THREE.SphereGeometry(400, 24, 16);
+      // 1. Panoramic Sky Dome Texture (Sky Gradient + Volumetric Clouds + 3-Layer Mountain Horizon)
+      const skyCanvas = document.createElement('canvas');
+      skyCanvas.width = 2048;
+      skyCanvas.height = 1024;
+      const sctx = skyCanvas.getContext('2d');
+
+      const skyGrad = sctx.createLinearGradient(0, 0, 0, 560);
+      skyGrad.addColorStop(0.0, '#2E6CB8');
+      skyGrad.addColorStop(0.55, '#599AD9');
+      skyGrad.addColorStop(0.84, '#92C3EC');
+      skyGrad.addColorStop(1.0, '#CFE4F4');
+      sctx.fillStyle = skyGrad;
+      sctx.fillRect(0, 0, 2048, 560);
+
+      const lowerGrad = sctx.createLinearGradient(0, 540, 0, 1024);
+      lowerGrad.addColorStop(0.0, '#467BA6');
+      lowerGrad.addColorStop(0.3, '#38687A');
+      lowerGrad.addColorStop(1.0, '#2F5632');
+      sctx.fillStyle = lowerGrad;
+      sctx.fillRect(0, 540, 2048, 484);
+
+      // Soft wrapping cumulus clouds positioned in visible upper sky band (y = 375..460)
+      function drawCloudPuff(cx, cy, rx, ry, alpha) {
+        for (let wrap = -1; wrap <= 1; wrap++) {
+          const x = cx + wrap * 2048;
+          if (x < -rx * 2 || x > 2048 + rx * 2) continue;
+          sctx.save();
+          sctx.translate(x, cy);
+          sctx.scale(1, ry / rx);
+          const g = sctx.createRadialGradient(0, 0, rx * 0.1, 0, 0, rx);
+          g.addColorStop(0, 'rgba(255, 255, 255, ' + alpha + ')');
+          g.addColorStop(0.52, 'rgba(246, 251, 255, ' + (alpha * 0.72) + ')');
+          g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          sctx.fillStyle = g;
+          sctx.beginPath();
+          sctx.arc(0, 0, rx, 0, Math.PI * 2);
+          sctx.fill();
+          sctx.restore();
+        }
+      }
+      for (let c = 0; c < 22; c++) {
+        const baseX = (c * 197 + 60) % 2048;
+        const baseY = 388 + (c % 4) * 18;
+        const scale = 0.62 + (c % 4) * 0.18;
+        drawCloudPuff(baseX, baseY, 85 * scale, 28 * scale, 0.72);
+        drawCloudPuff(baseX - 42 * scale, baseY + 6 * scale, 58 * scale, 22 * scale, 0.62);
+        drawCloudPuff(baseX + 44 * scale, baseY + 5 * scale, 64 * scale, 24 * scale, 0.62);
+        drawCloudPuff(baseX + 8 * scale, baseY - 10 * scale, 52 * scale, 20 * scale, 0.58);
+      }
+
+      // Seamless wrapping mountain ridge helper
+      function drawMountainLayer(baseY, amp1, amp2, amp3, phase, fillStyleTop, fillStyleBot) {
+        const mGrad = sctx.createLinearGradient(0, baseY - amp1 - amp2 - amp3, 0, 570);
+        mGrad.addColorStop(0, fillStyleTop);
+        mGrad.addColorStop(1, fillStyleBot);
+        sctx.fillStyle = mGrad;
+        sctx.beginPath();
+        sctx.moveTo(0, 575);
+        for (let x = 0; x <= 2048; x += 8) {
+          const t = (x / 2048) * Math.PI * 2;
+          const h1 = Math.abs(Math.sin(t * 3 + phase)) * amp1;
+          const h2 = Math.sin(t * 7 + phase * 1.7) * amp2;
+          const h3 = Math.cos(t * 13 + phase * 0.6) * amp3;
+          const y = baseY - (h1 + h2 + h3);
+          sctx.lineTo(x, y);
+        }
+        sctx.lineTo(2048, 575);
+        sctx.closePath();
+        sctx.fill();
+      }
+      // Far misty alpine peaks, mid sage ridges, near lush foothills
+      drawMountainLayer(492, 68, 22, 10, 0.4, '#6A91AD', '#9EC0D8');
+      drawMountainLayer(508, 46, 18, 8, 1.9, '#497365', '#6E9587');
+      drawMountainLayer(524, 30, 14, 6, 3.1, '#345E3D', '#4B7948');
+
+      const skyTexture = new THREE.CanvasTexture(skyCanvas);
+      const skyGeo = new THREE.SphereGeometry(520, 48, 32);
       const skyMat = new THREE.MeshBasicMaterial({
-        color: 0x0284c7,
-        side: THREE.BackSide
+        map: skyTexture,
+        side: THREE.BackSide,
+        fog: false
       });
       skyDome = new THREE.Mesh(skyGeo, skyMat);
       skyDome.position.set(0, 0, -100);
       scene.add(skyDome);
 
-      // Rolling Ground
-      const groundGeo = new THREE.PlaneGeometry(350, 400, 16, 16);
+      // Deep Horizon Base Terrain (far below road drops)
+      const baseFloorGeo = new THREE.PlaneGeometry(700, 700, 4, 4);
+      baseFloorGeo.rotateX(-Math.PI / 2);
+      const baseFloorMat = new THREE.MeshLambertMaterial({ color: 0x355C2D });
+      const baseFloorMesh = new THREE.Mesh(baseFloorGeo, baseFloorMat);
+      baseFloorMesh.position.set(0, -34, -160);
+      scene.add(baseFloorMesh);
+
+      // 2. Procedural Meadow Grass Texture & Contoured Right Hillside Ribbon
+      const grassCanvas = document.createElement('canvas');
+      grassCanvas.width = 256;
+      grassCanvas.height = 256;
+      const gctx = grassCanvas.getContext('2d');
+      gctx.fillStyle = '#4B7B36';
+      gctx.fillRect(0, 0, 256, 256);
+      for (let g = 0; g < 160; g++) {
+        gctx.fillStyle = (g % 2 === 0) ? 'rgba(92, 142, 62, 0.25)' : 'rgba(46, 86, 32, 0.22)';
+        const gx = (g * 53) % 256;
+        const gy = (g * 97) % 256;
+        gctx.fillRect(gx, gy, 18 + (g % 24), 6 + (g % 10));
+      }
+      grassTexture = new THREE.CanvasTexture(grassCanvas);
+      grassTexture.wrapS = THREE.RepeatWrapping;
+      grassTexture.wrapT = THREE.RepeatWrapping;
+      grassTexture.repeat.set(16, 24);
+
+      const groundGeo = new THREE.PlaneGeometry(180, 240, 16, 80);
       groundGeo.rotateX(-Math.PI / 2);
-      const groundMat = new THREE.MeshLambertMaterial({ color: 0x14532d });
+      groundGeo.translate(93.8, 0, -110);
+      groundGeo.userData = {
+        basePositions: new Float32Array(groundGeo.attributes.position.array)
+      };
+      const groundMat = new THREE.MeshStandardMaterial({
+        map: grassTexture,
+        roughness: 0.92,
+        metalness: 0.0,
+        side: THREE.DoubleSide
+      });
       groundMesh = new THREE.Mesh(groundGeo, groundMat);
-      groundMesh.position.set(0, -0.05, -100);
       scene.add(groundMesh);
 
-      // 1. Procedural Scrolling Road Texture Canvas (Asphalt, Orange/White Curbs, Dashed Yellow Center)
+      // 3. Procedural Shimmering Water Texture & Left Lakeside Ribbon
+      const lakeCanvas = document.createElement('canvas');
+      lakeCanvas.width = 256;
+      lakeCanvas.height = 256;
+      const lctx = lakeCanvas.getContext('2d');
+      const lGrad = lctx.createLinearGradient(0, 0, 256, 0);
+      lGrad.addColorStop(0.0, '#2B6496');
+      lGrad.addColorStop(0.6, '#3D7CB2');
+      lGrad.addColorStop(1.0, '#5092C4');
+      lctx.fillStyle = lGrad;
+      lctx.fillRect(0, 0, 256, 256);
+      for (let w = 0; w < 42; w++) {
+        lctx.fillStyle = 'rgba(224, 244, 255, 0.14)';
+        const wx = (w * 71) % 220;
+        const wy = (w * 37) % 250;
+        lctx.fillRect(wx, wy, 28 + (w % 20), 2);
+      }
+      lakeTexture = new THREE.CanvasTexture(lakeCanvas);
+      lakeTexture.wrapS = THREE.RepeatWrapping;
+      lakeTexture.wrapT = THREE.RepeatWrapping;
+      lakeTexture.repeat.set(6, 24);
+
+      const lakeGeo = new THREE.PlaneGeometry(210, 240, 6, 80);
+      lakeGeo.rotateX(-Math.PI / 2);
+      lakeGeo.translate(-109.2, 0, -110);
+      lakeGeo.userData = {
+        basePositions: new Float32Array(lakeGeo.attributes.position.array)
+      };
+      const lakeMat = new THREE.MeshStandardMaterial({
+        map: lakeTexture,
+        roughness: 0.28,
+        metalness: 0.15,
+        side: THREE.DoubleSide
+      });
+      lakeMesh = new THREE.Mesh(lakeGeo, lakeMat);
+      scene.add(lakeMesh);
+
+      // 4. Procedural Scrolling Road Texture Canvas (Smooth Asphalt, White Shoulder Lines, Dashed White Center)
       const roadTexCanvas = document.createElement('canvas');
       roadTexCanvas.width = 256;
       roadTexCanvas.height = 256;
       const rctx = roadTexCanvas.getContext('2d');
-      // Asphalt
-      rctx.fillStyle = '#1e293b';
+      rctx.fillStyle = '#50565E';
       rctx.fillRect(0, 0, 256, 256);
-      // Left & Right Alternating Rumble Curbs
-      rctx.fillStyle = '#f97316';
-      rctx.fillRect(0, 0, 14, 128);
-      rctx.fillRect(242, 0, 14, 128);
-      rctx.fillStyle = '#f8fafc';
-      rctx.fillRect(0, 128, 14, 128);
-      rctx.fillRect(242, 128, 14, 128);
-      // Dashed Center Line
-      rctx.fillStyle = '#facc15';
-      rctx.fillRect(124, 24, 8, 110);
+      for (let a = 0; a < 220; a++) {
+        rctx.fillStyle = (a % 2 === 0) ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.04)';
+        rctx.fillRect((a * 43) % 256, (a * 79) % 256, 3, 3);
+      }
+      rctx.fillStyle = '#3D4249';
+      rctx.fillRect(0, 0, 12, 256);
+      rctx.fillRect(244, 0, 12, 256);
+      rctx.fillStyle = '#F4F7F2';
+      rctx.fillRect(14, 0, 7, 256);
+      rctx.fillRect(235, 0, 7, 256);
+      rctx.fillStyle = '#E2E8F0';
+      rctx.fillRect(125, 24, 6, 110);
 
       roadTexture = new THREE.CanvasTexture(roadTexCanvas);
       roadTexture.wrapS = THREE.RepeatWrapping;
       roadTexture.wrapT = THREE.RepeatWrapping;
       roadTexture.repeat.set(1, 24);
 
-      // Road Geometry Ribbon spanning from z = +10 to z = -230
       const roadLength = 240;
       const roadSegments = 80;
       const roadWidth = 7.5;
 
       const roadGeo = new THREE.PlaneGeometry(roadWidth, roadLength, 1, roadSegments);
       roadGeo.rotateX(-Math.PI / 2);
-      roadGeo.translate(0, 0, -110); // Center from +10 to -230 along -Z
+      roadGeo.translate(0, 0, -110);
       roadGeo.userData = {
         basePositions: new Float32Array(roadGeo.attributes.position.array)
       };
 
-      const roadMat = new THREE.MeshLambertMaterial({
+      const roadMat = new THREE.MeshStandardMaterial({
         map: roadTexture,
+        roughness: 0.85,
+        metalness: 0.05,
         side: THREE.DoubleSide
       });
       roadMesh = new THREE.Mesh(roadGeo, roadMat);
       scene.add(roadMesh);
 
-      // Trees along hillsides
+      // 5. Continuous Smooth Ribbon Stone Retaining Wall & White Road Guardrails
+      const stoneCanvas = document.createElement('canvas');
+      stoneCanvas.width = 256;
+      stoneCanvas.height = 128;
+      const stctx = stoneCanvas.getContext('2d');
+      stctx.fillStyle = '#575E66';
+      stctx.fillRect(0, 0, 256, 128);
+      const stoneShades = ['#6E7680', '#7B828C', '#626870', '#858B94', '#5A616A'];
+      for (let row = 0; row < 4; row++) {
+        const y = row * 32 + 2;
+        const offset = (row % 2) * 28;
+        for (let col = -1; col < 5; col++) {
+          stctx.fillStyle = stoneShades[(row * 5 + col + 5) % stoneShades.length];
+          stctx.fillRect(col * 56 + offset + 2, y, 52, 27);
+        }
+      }
+      stoneTexture = new THREE.CanvasTexture(stoneCanvas);
+      stoneTexture.wrapS = THREE.RepeatWrapping;
+      stoneTexture.wrapT = THREE.ClampToEdgeWrapping;
+      stoneTexture.repeat.set(48, 1);
+
+      const stoneMat = new THREE.MeshStandardMaterial({
+        map: stoneTexture,
+        roughness: 0.90,
+        side: THREE.DoubleSide
+      });
+      const stoneTopMat = new THREE.MeshStandardMaterial({
+        color: 0x7A828C,
+        roughness: 0.85,
+        side: THREE.DoubleSide
+      });
+
+      function makeVerticalRibbon(xPos, yBottom, yTop, rotY, mat) {
+        const h = yTop - yBottom;
+        const geo = new THREE.PlaneGeometry(roadLength, h, roadSegments, 1);
+        geo.rotateY(rotY);
+        geo.translate(xPos, (yBottom + yTop) * 0.5, -110);
+        geo.userData = { basePositions: new Float32Array(geo.attributes.position.array) };
+        const mesh = new THREE.Mesh(geo, mat);
+        scene.add(mesh);
+        return mesh;
+      }
+
+      function makeHorizontalRibbon(xCenter, width, yPos, mat) {
+        const geo = new THREE.PlaneGeometry(width, roadLength, 1, roadSegments);
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(xCenter, yPos, -110);
+        geo.userData = { basePositions: new Float32Array(geo.attributes.position.array) };
+        const mesh = new THREE.Mesh(geo, mat);
+        scene.add(mesh);
+        return mesh;
+      }
+
+      stoneWallMesh = makeVerticalRibbon(-3.82, -0.78, 0.08, Math.PI / 2, stoneMat);
+      stoneWallOuterMesh = makeVerticalRibbon(-4.38, -0.78, 0.08, -Math.PI / 2, stoneMat);
+      stoneWallTopMesh = makeHorizontalRibbon(-4.10, 0.56, 0.08, stoneTopMat);
+
+      const railBeamMat = new THREE.MeshStandardMaterial({
+        color: 0xF4F7F9,
+        roughness: 0.35,
+        metalness: 0.15,
+        side: THREE.DoubleSide
+      });
+      const railTopMat = new THREE.MeshStandardMaterial({
+        color: 0xE2E8F0,
+        roughness: 0.40,
+        metalness: 0.15,
+        side: THREE.DoubleSide
+      });
+
+      leftRailFaceMesh = makeVerticalRibbon(-3.88, 0.42, 0.62, Math.PI / 2, railBeamMat);
+      leftRailTopMesh = makeHorizontalRibbon(-3.95, 0.14, 0.62, railTopMat);
+      rightRailFaceMesh = makeVerticalRibbon(3.88, 0.42, 0.62, -Math.PI / 2, railBeamMat);
+      rightRailTopMesh = makeHorizontalRibbon(3.95, 0.14, 0.62, railTopMat);
+
+      // Smooth Cylindrical Steel Guardrail Posts along both shoulders
+      guardrailPostsGroup = new THREE.Group();
+      const postGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.62, 12);
+      const postMat = new THREE.MeshStandardMaterial({ color: 0xCBD5E1, roughness: 0.45, metalness: 0.35 });
+      for (let i = 0; i < 40; i++) {
+        const pair = new THREE.Group();
+        const lp = new THREE.Mesh(postGeo, postMat);
+        lp.position.set(-3.96, 0.31, 0);
+        const rp = new THREE.Mesh(postGeo, postMat);
+        rp.position.set(3.96, 0.31, 0);
+        pair.add(lp, rp);
+        pair.userData = { baseDist: i * 6.0 };
+        guardrailPostsGroup.add(pair);
+      }
+      scene.add(guardrailPostsGroup);
+
+      // 6. Smooth 3-Tier Pine Trees along the contoured right hillside
       treesGroup = new THREE.Group();
-      const treeTrunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 1.8, 6);
-      const treeTrunkMat = new THREE.MeshLambertMaterial({ color: 0x451a03 });
-      const treeConeGeo1 = new THREE.ConeGeometry(1.6, 3.2, 7);
-      const treeConeGeo2 = new THREE.ConeGeometry(1.2, 2.5, 7);
-      const treeFoliageMat1 = new THREE.MeshLambertMaterial({ color: 0x166534 });
-      const treeFoliageMat2 = new THREE.MeshLambertMaterial({ color: 0x15803d });
+      const treeTrunkGeo = new THREE.CylinderGeometry(0.18, 0.28, 1.8, 12);
+      const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x5C3A21, roughness: 0.90 });
+      const treeConeGeo1 = new THREE.ConeGeometry(1.7, 2.8, 16);
+      const treeConeGeo2 = new THREE.ConeGeometry(1.3, 2.3, 16);
+      const treeConeGeo3 = new THREE.ConeGeometry(0.9, 1.8, 16);
+      const treeFoliageMat1 = new THREE.MeshStandardMaterial({ color: 0x22542D, roughness: 0.82 });
+      const treeFoliageMat2 = new THREE.MeshStandardMaterial({ color: 0x2B6B38, roughness: 0.80 });
+      const treeFoliageMat3 = new THREE.MeshStandardMaterial({ color: 0x378044, roughness: 0.78 });
 
       for (let i = 0; i < 48; i++) {
         const tree = new THREE.Group();
         const trunk = new THREE.Mesh(treeTrunkGeo, treeTrunkMat);
         trunk.position.y = 0.9;
         const c1 = new THREE.Mesh(treeConeGeo1, treeFoliageMat1);
-        c1.position.y = 2.4;
+        c1.position.y = 2.2;
         const c2 = new THREE.Mesh(treeConeGeo2, treeFoliageMat2);
-        c2.position.y = 3.6;
-        tree.add(trunk, c1, c2);
+        c2.position.y = 3.3;
+        const c3 = new THREE.Mesh(treeConeGeo3, treeFoliageMat3);
+        c3.position.y = 4.2;
+        tree.add(trunk, c1, c2, c3);
 
+        const scaleVar = 0.85 + (i % 5) * 0.14;
+        tree.scale.set(scaleVar, scaleVar, scaleVar);
         tree.userData = {
           baseDist: i * 5.0,
-          side: (i % 2 === 0 ? 1 : -1),
-          lateral: 5.5 + (i % 7) * 2.8
+          side: 1,
+          lateral: 7.5 + (i % 7) * 3.2
         };
         treesGroup.add(tree);
       }
       scene.add(treesGroup);
 
-      // Distance Arch Banner Gate (Every 500m)
+      // Distance Arch Banner Gate (Every 500m) - Deep Forest Ink & Electric Lime
       archMesh = new THREE.Group();
       const archPillarGeo = new THREE.BoxGeometry(0.4, 5.0, 0.4);
       const archBeamGeo = new THREE.BoxGeometry(roadWidth + 1.2, 0.7, 0.5);
       const archSignGeo = new THREE.BoxGeometry(roadWidth * 0.7, 0.8, 0.08);
-      const archOrangeMat = new THREE.MeshLambertMaterial({ color: 0xf97316 });
+      const archForestMat = new THREE.MeshStandardMaterial({ color: 0x0B1510, roughness: 0.6 });
 
       const archSignCanvas = document.createElement('canvas');
       archSignCanvas.width = 512;
@@ -1000,11 +1414,11 @@
 
       const archSignMat = new THREE.MeshBasicMaterial({ map: archSignTexture });
 
-      const leftP = new THREE.Mesh(archPillarGeo, archOrangeMat);
+      const leftP = new THREE.Mesh(archPillarGeo, archForestMat);
       leftP.position.set(-roadWidth * 0.5 - 0.2, 2.5, 0);
-      const rightP = new THREE.Mesh(archPillarGeo, archOrangeMat);
+      const rightP = new THREE.Mesh(archPillarGeo, archForestMat);
       rightP.position.set(roadWidth * 0.5 + 0.2, 2.5, 0);
-      const beam = new THREE.Mesh(archBeamGeo, archOrangeMat);
+      const beam = new THREE.Mesh(archBeamGeo, archForestMat);
       beam.position.set(0, 4.8, 0);
       const sign = new THREE.Mesh(archSignGeo, archSignMat);
       sign.position.set(0, 4.2, 0);
@@ -1017,12 +1431,12 @@
 
     function updateArchSignText(ctx, tex, text) {
       if (!ctx || !tex) return;
-      ctx.fillStyle = '#18181b';
+      ctx.fillStyle = '#0B1510';
       ctx.fillRect(0, 0, 512, 128);
-      ctx.strokeStyle = '#f97316';
+      ctx.strokeStyle = '#C8F04A';
       ctx.lineWidth = 6;
       ctx.strokeRect(6, 6, 500, 116);
-      ctx.fillStyle = '#f4f4f5';
+      ctx.fillStyle = '#C8F04A';
       ctx.font = 'bold 56px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(text, 256, 84);
@@ -1050,49 +1464,48 @@
       cylinderMesh.setRotationFromQuaternion(_tmpQuat);
     }
 
-    // Full Carbon Aero Road Bicycle & Sculpted Articulated Cyclist (IK)
+    // Full Carbon Aero Road Bicycle & Smooth Sculpted Articulated Cyclist (IK)
     function createBicycleAndCyclist() {
       bikeGroup = new THREE.Group();
 
-      const frameMat = new THREE.MeshLambertMaterial({ color: 0xf97316 }); // Velodrome Orange Carbon
-      const metalMat = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, roughness: 0.35, metalness: 0.7 });
-      const carbonRimMat = new THREE.MeshLambertMaterial({ color: 0x27272a }); // Matte Carbon Rim
-      const tireMat = new THREE.MeshLambertMaterial({ color: 0x18181b }); // Grip Rubber
-      const skinMat = new THREE.MeshLambertMaterial({ color: 0xfdba74 }); // Warm natural skin tone
-      const kitMat = new THREE.MeshLambertMaterial({ color: 0xf97316 }); // Pro Jersey Orange
-      const bibMat = new THREE.MeshLambertMaterial({ color: 0x18181b }); // Black Bib Shorts
-      const helmetMat = new THREE.MeshLambertMaterial({ color: 0xf8fafc }); // Gloss White Aero Road Helmet
-      const visorMat = new THREE.MeshLambertMaterial({ color: 0x0ea5e9 }); // Wrap-around Cyan Eyewear
-      const sockMat = new THREE.MeshLambertMaterial({ color: 0xf8fafc }); // Pure White Cycling Socks
-      const shoeMat = new THREE.MeshLambertMaterial({ color: 0x27272a }); // Road Cycling Shoes
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x13221A, roughness: 0.28, metalness: 0.35 });
+      const frameAccentMat = new THREE.MeshStandardMaterial({ color: 0xC8F04A, roughness: 0.28, metalness: 0.2 });
+      const metalMat = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, roughness: 0.30, metalness: 0.75 });
+      const carbonRimMat = new THREE.MeshStandardMaterial({ color: 0x1E293B, roughness: 0.45, metalness: 0.2 });
+      const tireMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.85 });
+      const skinMat = new THREE.MeshStandardMaterial({ color: 0xe6ac80, roughness: 0.62 });
+      const hairMat = new THREE.MeshStandardMaterial({ color: 0x1e1815, roughness: 0.85 });
+      const kitMat = new THREE.MeshStandardMaterial({ color: 0x247f8c, roughness: 0.56 });
+      const kitDarkMat = new THREE.MeshStandardMaterial({ color: 0x13221a, roughness: 0.58 });
+      const bibMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.68 });
+      const helmetMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.24, metalness: 0.08 });
+      const visorMat = new THREE.MeshStandardMaterial({ color: 0xC8F04A, roughness: 0.16, metalness: 0.42 });
+      const sockMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.72 });
+      const shoeMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.36, metalness: 0.06 });
+      const shoeSoleMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.32, metalness: 0.25 });
 
       // Deep-Section Carbon Wheels in YZ plane
       function buildWheelMesh() {
         const wg = new THREE.Group();
-        // Outer Rubber Tire
-        const tireGeo = new THREE.TorusGeometry(0.35, 0.026, 10, 32);
+        const tireGeo = new THREE.TorusGeometry(0.35, 0.026, 14, 40);
         tireGeo.rotateY(Math.PI / 2);
         wg.add(new THREE.Mesh(tireGeo, tireMat));
 
-        // Deep-section carbon rim
-        const rimGeo = new THREE.TorusGeometry(0.305, 0.024, 8, 32);
+        const rimGeo = new THREE.TorusGeometry(0.305, 0.024, 12, 40);
         rimGeo.rotateY(Math.PI / 2);
         wg.add(new THREE.Mesh(rimGeo, carbonRimMat));
 
-        // Center hub shell
-        const hubGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.11, 8);
+        const hubGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.11, 14);
         hubGeo.rotateZ(Math.PI / 2);
         wg.add(new THREE.Mesh(hubGeo, metalMat));
 
-        // Brake rotor / cassette disc
-        const rotorGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.008, 12);
+        const rotorGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.008, 20);
         rotorGeo.rotateZ(Math.PI / 2);
         const rotor = new THREE.Mesh(rotorGeo, metalMat);
         rotor.position.set(-0.04, 0, 0);
         wg.add(rotor);
 
-        // 8 Aerodynamic spokes
-        const spokeGeo = new THREE.CylinderGeometry(0.0035, 0.0035, 0.61, 4);
+        const spokeGeo = new THREE.CylinderGeometry(0.0035, 0.0035, 0.61, 6);
         for (let s = 0; s < 4; s++) {
           const sp = new THREE.Mesh(spokeGeo, metalMat);
           sp.rotation.x = (s * Math.PI) / 4;
@@ -1107,38 +1520,31 @@
       frontWheel.position.set(0, 0.35, 0.55);
 
       // 1. Carbon Road Frame Geometry
-      const rearDropout = [0, 0.35, -0.50];
-      const frontDropout = [0, 0.35, 0.55];
       const bb = [0, 0.33, -0.10];
       const seatCluster = [0, 0.68, -0.16];
       const headTubeBot = [0, 0.60, 0.42];
       const headTubeTop = [0, 0.74, 0.38];
 
-      // Main Triangle
       const seatTube = createFrameTube(bb, seatCluster, 0.022, frameMat);
       const downTube = createFrameTube(bb, headTubeBot, 0.027, frameMat);
-      const topTube = createFrameTube(seatCluster, headTubeTop, 0.020, frameMat);
+      const topTube = createFrameTube(seatCluster, headTubeTop, 0.020, frameAccentMat);
       const headTube = createFrameTube(headTubeBot, headTubeTop, 0.024, frameMat);
 
-      // Rear Triangle (Dual Stays)
       const leftChainstay = createFrameTube([-0.045, 0.35, -0.50], [-0.025, 0.33, -0.10], 0.013, frameMat);
       const rightChainstay = createFrameTube([0.045, 0.35, -0.50], [0.025, 0.33, -0.10], 0.013, frameMat);
       const leftSeatstay = createFrameTube([-0.045, 0.35, -0.50], [0, 0.68, -0.16], 0.012, frameMat);
       const rightSeatstay = createFrameTube([0.045, 0.35, -0.50], [0, 0.68, -0.16], 0.012, frameMat);
 
-      // Front Aero Fork Blades
-      const leftFork = createFrameTube([-0.018, 0.60, 0.42], [-0.045, 0.35, 0.55], 0.016, frameMat);
-      const rightFork = createFrameTube([0.018, 0.60, 0.42], [0.045, 0.35, 0.55], 0.016, frameMat);
+      const leftFork = createFrameTube([-0.018, 0.60, 0.42], [-0.045, 0.35, 0.55], 0.016, frameAccentMat);
+      const rightFork = createFrameTube([0.018, 0.60, 0.42], [0.045, 0.35, 0.55], 0.016, frameAccentMat);
 
-      // Seatpost & Contoured Racing Saddle
-      const seatpost = createFrameTube([0, 0.68, -0.16], [0, 0.75, -0.18], 0.015, metalMat);
-      const saddleGeo = new THREE.CylinderGeometry(0.045, 0.065, 0.24, 8);
+      const seatpost = createFrameTube([0, 0.68, -0.16], [0, 0.78, -0.18], 0.015, metalMat);
+      const saddleGeo = new THREE.CylinderGeometry(0.045, 0.065, 0.24, 16);
       saddleGeo.rotateX(Math.PI / 2);
       saddleGeo.scale(0.85, 0.35, 1.0);
       const saddle = new THREE.Mesh(saddleGeo, tireMat);
-      saddle.position.set(0, 0.76, -0.19);
+      saddle.position.set(0, 0.79, -0.19);
 
-      // Stem & Curved Road Drop Handlebars
       const stem = createFrameTube([0, 0.74, 0.38], [0, 0.77, 0.47], 0.018, metalMat);
       const topsBar = createFrameTube([-0.19, 0.77, 0.47], [0.19, 0.77, 0.47], 0.015, metalMat);
       const leftDrop = createFrameTube([-0.19, 0.77, 0.47], [-0.18, 0.71, 0.43], 0.014, metalMat);
@@ -1148,22 +1554,38 @@
       const rightHood = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.04, 0.06), tireMat);
       rightHood.position.set(0.18, 0.78, 0.49);
 
-      // Crank & Pedals
+      // Crankset with aligned arms (right TDC = +Y, left BDC = -Y) and leveling clipless pedals
       crankGroup = new THREE.Group();
       crankGroup.position.set(0, 0.33, -0.10);
-      const crankAxle = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.22, 8), metalMat);
+      const crankAxle = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.21, 14), metalMat);
       crankAxle.rotation.z = Math.PI / 2;
-      const chainring = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.10, 0.008, 16), metalMat);
+      const chainring = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.105, 0.007, 28), metalMat);
       chainring.rotation.z = Math.PI / 2;
-      chainring.position.x = 0.08;
+      chainring.position.x = -0.074;
+      const innerRing = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.068, 0.006, 24), tireMat);
+      innerRing.rotation.z = Math.PI / 2;
+      innerRing.position.x = -0.068;
 
-      const crankArmGeo = new THREE.BoxGeometry(0.024, 0.165, 0.014);
-      const leftArm = new THREE.Mesh(crankArmGeo, metalMat);
-      leftArm.position.set(-0.115, 0.06, 0);
+      const crankArmGeo = new THREE.BoxGeometry(0.012, 0.165, 0.025);
       const rightArm = new THREE.Mesh(crankArmGeo, metalMat);
-      rightArm.position.set(0.115, -0.06, 0);
+      rightArm.position.set(0.102, 0.0825, 0);
+      const leftArm = new THREE.Mesh(crankArmGeo, metalMat);
+      leftArm.position.set(-0.102, -0.0825, 0);
 
-      crankGroup.add(crankAxle, chainring, leftArm, rightArm);
+      function createPedalPlatform() {
+        const pg = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.014, 0.056), tireMat);
+        const spindle = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.034, 10), metalMat);
+        spindle.rotation.z = Math.PI / 2;
+        pg.add(body, spindle);
+        return pg;
+      }
+      rightPedal = createPedalPlatform();
+      rightPedal.position.set(0.102, 0.165, 0);
+      leftPedal = createPedalPlatform();
+      leftPedal.position.set(-0.102, -0.165, 0);
+
+      crankGroup.add(crankAxle, chainring, innerRing, leftArm, rightArm, leftPedal, rightPedal);
 
       bikeGroup.add(
         rearWheel, frontWheel,
@@ -1175,128 +1597,364 @@
         crankGroup
       );
 
-      // 2. Sculpted Anatomical Cyclist
+      // 2. Anatomically Sculpted Pro Road Cyclist
       cyclistGroup = new THREE.Group();
 
-      // Pelvis / Bib Shorts
-      const pelvisGeo = new THREE.SphereGeometry(0.14, 12, 10);
-      pelvisGeo.scale(1.0, 0.78, 0.95);
+      // Glute-contoured Pelvis & Bib Shorts waist bridge (anchored over saddle)
+      const pelvisGeo = new THREE.SphereGeometry(0.145, 28, 22);
+      const pPos = pelvisGeo.attributes.position;
+      for (let i = 0; i < pPos.count; i++) {
+        const vx = pPos.getX(i);
+        const vy = pPos.getY(i);
+        const vz = pPos.getZ(i);
+        const ny = vy / 0.145;
+        const isBack = vz < 0;
+        const archMask = Math.max(0, 1 - ny * ny);
+        const gluteLobe = isBack ? Math.exp(-Math.pow((Math.abs(vx) - 0.056) / 0.048, 2)) * archMask * 0.022 : 0;
+        const gluteCleft = isBack ? Math.exp(-Math.pow(vx / 0.020, 2)) * archMask * 0.011 : 0;
+        const widthTaper = 0.92 - ny * 0.06;
+        pPos.setXYZ(i, vx * widthTaper, vy * 0.80, vz * 0.90 - gluteLobe + gluteCleft);
+      }
+      pelvisGeo.computeVertexNormals();
       const pelvis = new THREE.Mesh(pelvisGeo, bibMat);
-      pelvis.position.set(0, 0.76, -0.17);
+      pelvis.position.set(0, 0.805, -0.17);
 
-      // S-Curved Anatomical Spine & Torso (Curved aerodynamic tuck)
-      const torsoLowerGeo = new THREE.SphereGeometry(0.13, 10, 8);
-      torsoLowerGeo.scale(0.98, 0.88, 0.95);
-      const torsoLower = new THREE.Mesh(torsoLowerGeo, kitMat);
-      torsoLower.position.set(0, 0.85, -0.11);
+      const waistBandGeo = new THREE.CylinderGeometry(0.118, 0.132, 0.08, 26);
+      const waistBand = new THREE.Mesh(waistBandGeo, bibMat);
+      waistBand.position.set(0, 0.840, -0.140);
+      waistBand.rotation.x = 0.78;
 
-      const torsoMidGeo = new THREE.SphereGeometry(0.14, 10, 8);
-      torsoMidGeo.scale(1.05, 0.92, 1.0);
-      const torsoMid = new THREE.Mesh(torsoMidGeo, kitMat);
-      torsoMid.position.set(0, 0.95, -0.01);
+      // Smooth hip socket spheres bridging glutes cleanly into upper thighs
+      const hipJointGeo = new THREE.SphereGeometry(0.062, 18, 14);
+      const leftHipJoint = new THREE.Mesh(hipJointGeo, bibMat);
+      leftHipJoint.position.set(-0.102, 0.805, -0.175);
+      const rightHipJoint = new THREE.Mesh(hipJointGeo, bibMat);
+      rightHipJoint.position.set(0.102, 0.805, -0.175);
+      cyclistGroup.add(pelvis, waistBand, leftHipJoint, rightHipJoint);
 
-      const torsoUpperGeo = new THREE.SphereGeometry(0.155, 12, 10);
-      torsoUpperGeo.scale(1.24, 0.86, 1.05);
-      const torsoUpper = new THREE.Mesh(torsoUpperGeo, kitMat);
-      torsoUpper.position.set(0, 1.04, 0.12);
+      // Shared Helper for multi-section sculpted cylindrical body limbs (t = 0 at -Y, 1 at +Y)
+      function buildSculptedSection(len, radiusFn, yMinRatio, yMaxRatio, mat, radialSeg = 22, heightSeg = 10) {
+        const subLen = len * (yMaxRatio - yMinRatio);
+        const geo = new THREE.CylinderGeometry(1, 1, subLen, radialSeg, heightSeg);
+        const pos = geo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
+          const localFrac = (vy + subLen * 0.5) / subLen;
+          const t = yMinRatio + localFrac * (yMaxRatio - yMinRatio);
+          const r = radiusFn(t);
+          pos.setXYZ(i, vx * r.x, vy, vz * r.z);
+        }
+        geo.computeVertexNormals();
+        const mesh = new THREE.Mesh(geo, mat);
+        const midRatio = (yMinRatio + yMaxRatio) * 0.5;
+        mesh.position.y = (midRatio - 0.5) * len;
+        return mesh;
+      }
 
-      // Jersey rear-pocket racing stripe
-      const pocketStripeGeo = new THREE.BoxGeometry(0.18, 0.04, 0.03);
-      const pocketStripe = new THREE.Mesh(pocketStripeGeo, sockMat);
-      pocketStripe.position.set(0, 0.88, -0.22);
-      pocketStripe.rotation.x = -0.3;
+      // Upper-body pivot centered at pelvis/waist so micro-sway keeps hands anchored at hood height
+      const ubPivotY = 0.81, ubPivotZ = -0.17;
+      function ubVec(x, y, z) {
+        return new THREE.Vector3(x, y - ubPivotY, z - ubPivotZ);
+      }
+      cyclistUpperBody = new THREE.Group();
+      cyclistUpperBody.position.set(0, ubPivotY, ubPivotZ);
 
-      // Neck & Natural Skin-tone Head
-      const neckGeo = new THREE.CylinderGeometry(0.042, 0.046, 0.10, 8);
-      const neck = new THREE.Mesh(neckGeo, skinMat);
-      neck.position.set(0, 1.12, 0.20);
-      neck.rotation.x = 0.55;
+      // Unified Parametric Torso Deformation (shared with rear jersey pockets for flush fit)
+      const torsoVBot = ubVec(0, 0.815, -0.155);
+      const torsoVTop = ubVec(0, 1.125, 0.175);
+      const torsoLen = torsoVBot.distanceTo(torsoVTop); // ~0.453m
 
-      const headGeo = new THREE.SphereGeometry(0.105, 12, 10);
+      function deformTorsoPoint(vx, normH, vz, radialOffset) {
+        const taperTop = normH > 0.80 ? Math.cos(((normH - 0.80) / 0.20) * Math.PI * 0.46) : 1.0;
+        const taperBot = normH < 0.10 ? (0.88 + 0.12 * (normH / 0.10)) : 1.0;
+        const baseW = (0.118 + Math.sin(Math.pow(normH, 0.78) * Math.PI * 0.82) * 0.044) * taperBot * (0.58 + 0.42 * taperTop) + radialOffset;
+        const baseD = (0.090 + Math.sin(Math.pow(normH, 0.84) * Math.PI * 0.85) * 0.025) * taperBot * (0.62 + 0.38 * taperTop) + radialOffset;
+
+        const sx = vx * baseW;
+        const backWeight = vz < 0 ? (-vz) : 0;
+        const spineFurrow = backWeight * Math.exp(-Math.pow(sx / 0.026, 2)) * Math.sin(normH * Math.PI) * 0.011;
+        const scapulaSwell = backWeight * Math.exp(-Math.pow((Math.abs(sx) - 0.070) / 0.042, 2)) * Math.exp(-Math.pow((normH - 0.72) / 0.18, 2)) * 0.012;
+        const chestSwell = vz > 0 ? vz * Math.exp(-Math.pow((normH - 0.66) / 0.22, 2)) * 0.018 : 0;
+        const backArchZ = -Math.sin(normH * Math.PI) * 0.024;
+        return {
+          x: sx,
+          z: vz * baseD + backArchZ + spineFurrow - scapulaSwell + chestSwell
+        };
+      }
+
+      const torsoGeo = new THREE.CylinderGeometry(1, 1, torsoLen, 32, 18);
+      const tPos = torsoGeo.attributes.position;
+      for (let i = 0; i < tPos.count; i++) {
+        const vx = tPos.getX(i), vy = tPos.getY(i), vz = tPos.getZ(i);
+        const normH = (vy + torsoLen * 0.5) / torsoLen;
+        const pt = deformTorsoPoint(vx, normH, vz, 0);
+        tPos.setXYZ(i, pt.x, vy, pt.z);
+      }
+      torsoGeo.computeVertexNormals();
+      const torso = new THREE.Mesh(torsoGeo, kitMat);
+      alignCylinder(torso, torsoVBot, torsoVTop);
+
+      // Flush Surface-Conformed 3-Compartment Rear Pockets & Lime Reflective Hem Stripe
+      function buildConformedBackArc(hMin, hMax, radialOffset, thetaStart, thetaLen, mat) {
+        const subLen = torsoLen * (hMax - hMin);
+        const geo = new THREE.CylinderGeometry(1, 1, subLen, 20, 6, true, thetaStart, thetaLen);
+        const pos = geo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
+          const localFrac = (vy + subLen * 0.5) / subLen;
+          const normH = hMin + localFrac * (hMax - hMin);
+          const pt = deformTorsoPoint(vx, normH, vz, radialOffset);
+          pos.setXYZ(i, pt.x, vy + ((hMin + hMax) * 0.5 - 0.5) * torsoLen, pt.z);
+        }
+        geo.computeVertexNormals();
+        const mesh = new THREE.Mesh(geo, mat);
+        alignCylinder(mesh, torsoVBot, torsoVTop);
+        return mesh;
+      }
+
+      const pocketShell = buildConformedBackArc(0.07, 0.28, 0.004, Math.PI * 0.72, Math.PI * 0.56, kitDarkMat);
+      const pocketTrim = buildConformedBackArc(0.275, 0.300, 0.005, Math.PI * 0.72, Math.PI * 0.56, frameAccentMat);
+      const pocketDivL = buildConformedBackArc(0.08, 0.275, 0.006, Math.PI * 0.895, 0.025, bibMat);
+      const pocketDivR = buildConformedBackArc(0.08, 0.275, 0.006, Math.PI * 1.080, 0.025, bibMat);
+
+      // Collar cuff
+      const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.064, 0.030, 22), kitDarkMat);
+      collar.position.copy(ubVec(0, 1.125, 0.180));
+      collar.rotation.x = 0.74;
+
+      // Blended Deltoid Shoulder Caps tucked seamlessly into upper torso yoke
+      const shoulderGeo = new THREE.SphereGeometry(0.048, 20, 16);
+      shoulderGeo.scale(0.98, 0.94, 1.04);
+      const leftShoulder = new THREE.Mesh(shoulderGeo, kitMat);
+      leftShoulder.position.copy(ubVec(-0.145, 1.072, 0.138));
+      const rightShoulder = new THREE.Mesh(shoulderGeo, kitMat);
+      rightShoulder.position.copy(ubVec(0.145, 1.072, 0.138));
+
+      // Seamless Short-Sleeve Jersey Cuffs + Tanned Upper/Forearms & Hood Gloves
+      const elbowGeo = new THREE.SphereGeometry(0.032, 16, 12);
+      const forearmGeo = new THREE.CylinderGeometry(0.033, 0.023, 0.195, 20, 6);
+      const fPos = forearmGeo.attributes.position;
+      for (let i = 0; i < fPos.count; i++) {
+        const vx = fPos.getX(i), vy = fPos.getY(i), vz = fPos.getZ(i);
+        const t = (vy + 0.0975) / 0.195; // 0 = elbow, 1 = wrist
+        const swell = 1.0 + Math.sin(t * Math.PI) * 0.12 * (1 - t * 0.4);
+        fPos.setXYZ(i, vx * swell, vy, vz * swell);
+      }
+      forearmGeo.computeVertexNormals();
+
+      const gloveGeo = new THREE.SphereGeometry(0.032, 16, 12);
+      gloveGeo.scale(0.84, 0.88, 1.48);
+
+      function attachArm(side) {
+        const sVec = ubVec(side * 0.145, 1.072, 0.138);
+        const elbowPos = ubVec(side * 0.188, 0.900, 0.322);
+        const wristPos = ubVec(side * 0.180, 0.798, 0.465);
+        const handPos = ubVec(side * 0.180, 0.794, 0.494);
+        const armLen = sVec.distanceTo(elbowPos);
+
+        const armRadius = (t) => ({
+          x: 0.047 * (1 - t) + 0.032 * t + Math.sin(t * Math.PI) * 0.003,
+          z: 0.048 * (1 - t) + 0.032 * t + Math.sin(t * Math.PI) * 0.003
+        });
+
+        const upperArmGroup = new THREE.Group();
+        upperArmGroup.add(buildSculptedSection(armLen, armRadius, 0.0, 0.62, kitMat, 20, 6));
+        upperArmGroup.add(buildSculptedSection(armLen, (t) => {
+          const b = armRadius(t);
+          return { x: b.x + 0.0012, z: b.z + 0.0012 };
+        }, 0.59, 0.64, kitDarkMat, 20, 2));
+        upperArmGroup.add(buildSculptedSection(armLen, (t) => {
+          const b = armRadius(t);
+          return { x: b.x + 0.0016, z: b.z + 0.0016 };
+        }, 0.62, 0.638, frameAccentMat, 20, 2));
+        upperArmGroup.add(buildSculptedSection(armLen, armRadius, 0.62, 1.0, skinMat, 20, 4));
+        alignCylinder(upperArmGroup, sVec, elbowPos);
+
+        const elbow = new THREE.Mesh(elbowGeo, skinMat);
+        elbow.position.copy(elbowPos);
+
+        const forearm = new THREE.Mesh(forearmGeo, skinMat);
+        alignCylinder(forearm, elbowPos, wristPos);
+
+        const glove = new THREE.Mesh(gloveGeo, bibMat);
+        glove.position.copy(handPos);
+        glove.rotation.x = 0.22;
+
+        cyclistUpperBody.add(upperArmGroup, elbow, forearm, glove);
+      }
+      attachArm(-1);
+      attachArm(1);
+
+      // Neck, Anatomical Sculpted Face/Jaw, Hair Nape, Ears, Eyewear & Sleek Low-Profile Aero Helmet
+      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.041, 0.049, 0.115, 20), skinMat);
+      alignCylinder(neck, ubVec(0, 1.11, 0.175), ubVec(0, 1.185, 0.24));
+
+      const headGeo = new THREE.SphereGeometry(0.094, 24, 20);
+      const hdPos = headGeo.attributes.position;
+      for (let i = 0; i < hdPos.count; i++) {
+        const vx = hdPos.getX(i), vy = hdPos.getY(i), vz = hdPos.getZ(i);
+        const chinTaper = vy < 0 ? Math.max(0.68, 1.0 + (vy / 0.094) * 0.26) : 1.0;
+        const noseBump = (vz > 0.04 && Math.abs(vx) < 0.022 && vy > -0.025 && vy < 0.020) ? 0.012 : 0;
+        hdPos.setXYZ(i, vx * 0.86 * chinTaper, vy * 1.04, vz * 1.04 + noseBump);
+      }
+      headGeo.computeVertexNormals();
       const head = new THREE.Mesh(headGeo, skinMat);
-      head.position.set(0, 1.18, 0.27);
+      head.position.copy(ubVec(0, 1.215, 0.262));
 
-      // Sculpted Aerodynamic Road Helmet (Rounded aero teardrop with rear tail)
-      const helmetGeo = new THREE.SphereGeometry(0.13, 12, 10);
-      helmetGeo.scale(0.96, 0.72, 1.34);
-      const helmet = new THREE.Mesh(helmetGeo, helmetMat);
-      helmet.position.set(0, 1.22, 0.27);
-      helmet.rotation.x = 0.28;
+      const hairGeo = new THREE.SphereGeometry(0.093, 22, 16);
+      hairGeo.scale(0.84, 0.70, 0.74);
+      const hair = new THREE.Mesh(hairGeo, hairMat);
+      hair.position.copy(ubVec(0, 1.204, 0.232));
 
-      // Dark aero vent channels on helmet
-      const ventGeo = new THREE.BoxGeometry(0.022, 0.02, 0.18);
-      const ventLeft = new THREE.Mesh(ventGeo, bibMat);
-      ventLeft.position.set(-0.045, 1.26, 0.27);
-      ventLeft.rotation.x = 0.28;
-      const ventRight = new THREE.Mesh(ventGeo, bibMat);
-      ventRight.position.set(0.045, 1.26, 0.27);
-      ventRight.rotation.x = 0.28;
+      const earGeo = new THREE.SphereGeometry(0.017, 12, 10);
+      earGeo.scale(0.42, 1.15, 0.75);
+      const leftEar = new THREE.Mesh(earGeo, skinMat);
+      leftEar.position.copy(ubVec(-0.080, 1.205, 0.254));
+      const rightEar = new THREE.Mesh(earGeo, skinMat);
+      rightEar.position.copy(ubVec(0.080, 1.205, 0.254));
 
-      // Wrap-around Eyewear Visor
-      const visorGeo = new THREE.CylinderGeometry(0.108, 0.108, 0.032, 10, 1, false, -Math.PI * 0.45, Math.PI * 0.9);
-      const eyewear = new THREE.Mesh(visorGeo, visorMat);
-      eyewear.position.set(0, 1.18, 0.28);
+      const eyewear = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.096, 0.096, 0.032, 22, 1, false, -Math.PI * 0.42, Math.PI * 0.84),
+        visorMat
+      );
+      eyewear.position.copy(ubVec(0, 1.218, 0.278));
       eyewear.rotation.y = Math.PI / 2;
 
-      // Articulated Arms to Brake Hoods
-      const armUpperGeo = new THREE.CylinderGeometry(0.038, 0.032, 0.25, 8);
-      const armForeGeo = new THREE.CylinderGeometry(0.030, 0.024, 0.26, 8);
-      const gloveGeo = new THREE.BoxGeometry(0.045, 0.035, 0.06);
+      const templeGeo = new THREE.BoxGeometry(0.006, 0.008, 0.075);
+      const templeL = new THREE.Mesh(templeGeo, bibMat);
+      templeL.position.copy(ubVec(-0.084, 1.222, 0.276));
+      const templeR = new THREE.Mesh(templeGeo, bibMat);
+      templeR.position.copy(ubVec(0.084, 1.222, 0.276));
 
-      // Left Arm
-      const leftUpperArm = new THREE.Mesh(armUpperGeo, kitMat);
-      const leftForearm = new THREE.Mesh(armForeGeo, skinMat);
-      const leftGlove = new THREE.Mesh(gloveGeo, bibMat);
-      alignCylinder(leftUpperArm, new THREE.Vector3(-0.17, 1.04, 0.14), new THREE.Vector3(-0.19, 0.88, 0.31));
-      alignCylinder(leftForearm, new THREE.Vector3(-0.19, 0.88, 0.31), new THREE.Vector3(-0.18, 0.79, 0.49));
-      leftGlove.position.set(-0.18, 0.79, 0.49);
+      // Low-Profile Aero Road Helmet with Kamm-Tail & Snug Occipital Cradle
+      const helmetShellGeo = new THREE.SphereGeometry(0.114, 28, 22);
+      const hPos = helmetShellGeo.attributes.position;
+      for (let i = 0; i < hPos.count; i++) {
+        const vx = hPos.getX(i), vy = hPos.getY(i), vz = hPos.getZ(i);
+        const isRear = vz < 0;
+        const tailStretch = isRear ? 1.30 : 1.08;
+        const tailPinch = isRear ? Math.max(0.62, 1.0 - Math.abs(vz / 0.114) * 0.36) : 1.0;
+        const flatBaseY = vy < -0.022 ? -0.022 + (vy + 0.022) * 0.26 : vy;
+        hPos.setXYZ(i, vx * 0.90 * tailPinch, flatBaseY * 0.66, vz * tailStretch);
+      }
+      helmetShellGeo.computeVertexNormals();
+      const helmetShell = new THREE.Mesh(helmetShellGeo, helmetMat);
+      helmetShell.position.copy(ubVec(0, 1.246, 0.256));
+      helmetShell.rotation.x = 0.08;
 
-      // Right Arm
-      const rightUpperArm = new THREE.Mesh(armUpperGeo, kitMat);
-      const rightForearm = new THREE.Mesh(armForeGeo, skinMat);
-      const rightGlove = new THREE.Mesh(gloveGeo, bibMat);
-      alignCylinder(rightUpperArm, new THREE.Vector3(0.17, 1.04, 0.14), new THREE.Vector3(0.19, 0.88, 0.31));
-      alignCylinder(rightForearm, new THREE.Vector3(0.19, 0.88, 0.31), new THREE.Vector3(0.18, 0.79, 0.49));
-      rightGlove.position.set(0.18, 0.79, 0.49);
+      const helmetSpine = new THREE.Mesh(new THREE.BoxGeometry(0.020, 0.020, 0.21), frameAccentMat);
+      helmetSpine.position.copy(ubVec(0, 1.280, 0.244));
+      helmetSpine.rotation.x = 0.12;
 
-      cyclistGroup.add(
-        pelvis, torsoLower, torsoMid, torsoUpper, pocketStripe,
-        neck, head, helmet, ventLeft, ventRight, eyewear,
-        leftUpperArm, leftForearm, leftGlove,
-        rightUpperArm, rightForearm, rightGlove
+      const ventGeo = new THREE.BoxGeometry(0.018, 0.018, 0.14);
+      const ventLeft = new THREE.Mesh(ventGeo, kitDarkMat);
+      ventLeft.position.copy(ubVec(-0.042, 1.270, 0.240));
+      ventLeft.rotation.set(0.10, -0.10, 0);
+      const ventRight = new THREE.Mesh(ventGeo, kitDarkMat);
+      ventRight.position.copy(ubVec(0.042, 1.270, 0.240));
+      ventRight.rotation.set(0.10, 0.10, 0);
+
+      const cradle = new THREE.Mesh(new THREE.CylinderGeometry(0.084, 0.078, 0.024, 22), bibMat);
+      cradle.position.copy(ubVec(0, 1.206, 0.215));
+      cradle.rotation.x = 0.42;
+      const retentionDial = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.011, 12), frameAccentMat);
+      retentionDial.rotation.x = Math.PI / 2;
+      retentionDial.position.copy(ubVec(0, 1.198, 0.145));
+
+      cyclistUpperBody.add(
+        torso, collar, pocketShell, pocketTrim, pocketDivL, pocketDivR,
+        leftShoulder, rightShoulder,
+        neck, head, hair, leftEar, rightEar, eyewear, templeL, templeR,
+        helmetShell, helmetSpine, ventLeft, ventRight, cradle, retentionDial
       );
+      cyclistGroup.add(cyclistUpperBody);
 
-      // 3. 2-Bone Analytical IK Legs (Thigh -> Knee -> Calf -> Sock -> Shoe)
+      // 3. Two-Part Sculpted Anatomical Legs & Aero Cycling Shoes (2-Bone IK)
       function buildLegMesh(side) {
+        const L1 = 0.325;
+        const L2 = 0.315;
         const legGroup = new THREE.Group();
-        const thighGeo = new THREE.CylinderGeometry(0.048, 0.038, 0.35, 10);
-        const thighMesh = new THREE.Mesh(thighGeo, bibMat);
 
-        const kneeGeo = new THREE.SphereGeometry(0.040, 10, 8);
+        // Thigh Group (0 = Hip, 1 = Knee): Bib shorts upper 68% + Silicone Gripper + Skin lower quad
+        const thighGroup = new THREE.Group();
+        const thighRadius = (t) => ({
+          x: 0.062 * (1 - t) + 0.0405 * t + 0.008 * Math.sin(t * Math.PI),
+          z: 0.068 * (1 - t) + 0.0425 * t + 0.010 * Math.sin(t * Math.PI)
+        });
+        thighGroup.add(buildSculptedSection(L1, thighRadius, 0.0, 0.68, bibMat));
+        thighGroup.add(buildSculptedSection(L1, (t) => {
+          const base = thighRadius(t);
+          return { x: base.x + 0.0015, z: base.z + 0.0015 };
+        }, 0.63, 0.69, kitDarkMat));
+        thighGroup.add(buildSculptedSection(L1, (t) => {
+          const base = thighRadius(t);
+          return { x: base.x + 0.0020, z: base.z + 0.0020 };
+        }, 0.68, 0.705, frameAccentMat));
+        thighGroup.add(buildSculptedSection(L1, thighRadius, 0.68, 1.0, skinMat));
+
+        const kneeGeo = new THREE.SphereGeometry(0.041, 18, 14);
+        kneeGeo.scale(0.96, 1.02, 1.04);
         const kneeMesh = new THREE.Mesh(kneeGeo, skinMat);
 
-        const calfGeo = new THREE.CylinderGeometry(0.036, 0.026, 0.34, 10);
-        const calfMesh = new THREE.Mesh(calfGeo, skinMat);
+        // Calf Group (0 = Knee, 1 = Ankle): Tanned sculpted calf + tall aero white sock
+        const calfGroup = new THREE.Group();
+        const calfRadius = (t) => {
+          const swell = 0.011 * Math.exp(-Math.pow((t - 0.32) / 0.24, 2));
+          return {
+            x: 0.0395 * (1 - t) + 0.024 * t + swell * 0.85,
+            z: 0.0415 * (1 - t) + 0.025 * t + swell * 1.15
+          };
+        };
+        calfGroup.add(buildSculptedSection(L2, calfRadius, 0.0, 0.60, skinMat));
+        calfGroup.add(buildSculptedSection(L2, (t) => {
+          const base = calfRadius(t);
+          return { x: base.x + 0.0015, z: base.z + 0.0015 };
+        }, 0.59, 0.63, kitDarkMat));
+        calfGroup.add(buildSculptedSection(L2, (t) => {
+          const base = calfRadius(t);
+          return { x: base.x + 0.0018, z: base.z + 0.0018 };
+        }, 0.60, 0.618, frameAccentMat));
+        calfGroup.add(buildSculptedSection(L2, (t) => {
+          const base = calfRadius(Math.min(1.0, t));
+          return { x: base.x + 0.001, z: base.z + 0.001 };
+        }, 0.62, 1.05, sockMat));
 
-        const sockGeo = new THREE.CylinderGeometry(0.028, 0.026, 0.10, 10);
-        const sockMesh = new THREE.Mesh(sockGeo, sockMat);
+        // Road Cycling Shoe Group (origin at pedal cleat)
+        const shoeGroup = new THREE.Group();
+        const sole = new THREE.Mesh(new THREE.BoxGeometry(0.070, 0.013, 0.172), shoeSoleMat);
+        sole.position.set(0, -0.003, 0.012);
 
-        const shoeGeo = new THREE.BoxGeometry(0.065, 0.042, 0.13);
-        const shoeMesh = new THREE.Mesh(shoeGeo, shoeMat);
+        const upperGeo = new THREE.SphereGeometry(0.043, 18, 14);
+        upperGeo.scale(0.84, 0.62, 1.95);
+        const upper = new THREE.Mesh(upperGeo, shoeMat);
+        upper.position.set(0, 0.016, 0.016);
 
-        legGroup.add(thighMesh, kneeMesh, calfMesh, sockMesh, shoeMesh);
+        const heelCup = new THREE.Mesh(new THREE.CylinderGeometry(0.030, 0.033, 0.050, 16), shoeSoleMat);
+        heelCup.scale.set(1.04, 1.0, 0.85);
+        heelCup.position.set(0, 0.024, -0.055);
+
+        const heelTab = new THREE.Mesh(new THREE.BoxGeometry(0.010, 0.042, 0.008), frameAccentMat);
+        heelTab.position.set(0, 0.028, -0.082);
+
+        const dialGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.008, 10);
+        dialGeo.rotateZ(Math.PI / 2);
+        const dial = new THREE.Mesh(dialGeo, bibMat);
+        dial.position.set(side * 0.036, 0.028, 0.006);
+
+        shoeGroup.add(sole, upper, heelCup, heelTab, dial);
+
+        legGroup.add(thighGroup, kneeMesh, calfGroup, shoeGroup);
         cyclistGroup.add(legGroup);
 
         return {
           side: side,
-          thighMesh: thighMesh,
+          thighMesh: thighGroup,
           kneeMesh: kneeMesh,
-          calfMesh: calfMesh,
-          sockMesh: sockMesh,
-          shoeMesh: shoeMesh,
-          hip: new THREE.Vector3(side * 0.115, 0.75, -0.17),
-          L1: 0.35,
-          L2: 0.34
+          calfMesh: calfGroup,
+          shoeMesh: shoeGroup,
+          hip: new THREE.Vector3(side * 0.102, 0.805, -0.175),
+          L1: L1,
+          L2: L2
         };
       }
 
@@ -1305,38 +1963,49 @@
 
       bikeGroup.add(cyclistGroup);
 
-      // Rotate bikeGroup by Math.PI so it faces -Z (Forward along the road)
       bikeGroup.rotation.y = Math.PI;
       bikeGroup.position.set(0, 0, 0);
       scene.add(bikeGroup);
     }
 
-    // Analytical Law of Cosines 2-Bone IK Leg Solver
+    // Analytical Law of Cosines 2-Bone IK Leg Solver (Forward Crank Rotation)
     function updateLegIK(leg, crankAngle) {
       if (!leg) return;
+      // right (side > 0) starts at top (+Y) when crankAngle = 0; left (side < 0) at bottom (-Y)
       const phi = crankAngle + (leg.side > 0 ? 0 : Math.PI);
       const R = 0.165; // Crank arm radius
-      const Py = 0.33 + R * Math.sin(phi);
-      const Pz = -0.10 + R * Math.cos(phi);
-      const Px = leg.side * 0.115;
+
+      // Three.js +X rotation moves +Y -> +Z -> -Y -> -Z (forward pedaling in bike-local coords)
+      const Py = 0.33 + R * Math.cos(phi);
+      const Pz = -0.10 + R * Math.sin(phi);
+      const Px = leg.side * 0.102;
+
+      // Dynamic pro road ankling: flat/heel-drop on power downstroke, slight toe dip through BDC
+      const shoeRotX = -0.05 - Math.cos(phi) * 0.14 + Math.sin(phi) * 0.06;
+      leg.shoeMesh.position.set(Px, Py + 0.010, Pz);
+      leg.shoeMesh.rotation.x = shoeRotX;
+
+      // Target the anatomical ankle socket behind/above the pedal cleat
+      const localAnkleY = 0.038;
+      const localAnkleZ = -0.055;
+      const Ay = (Py + 0.010) + localAnkleY * Math.cos(shoeRotX) - localAnkleZ * Math.sin(shoeRotX);
+      const Az = Pz + localAnkleY * Math.sin(shoeRotX) + localAnkleZ * Math.cos(shoeRotX);
 
       const Hy = leg.hip.y;
       const Hz = leg.hip.z;
       const Hx = leg.hip.x;
 
-      const Dy = Py - Hy;
-      const Dz = Pz - Hz;
-      const d = Math.sqrt(Dy * Dy + Dz * Dz);
+      const Dy = Ay - Hy;
+      const Dz = Az - Hz;
+      const d = Math.max(0.05, Math.min(leg.L1 + leg.L2 - 0.005, Math.sqrt(Dy * Dy + Dz * Dz)));
 
       const L1 = leg.L1;
       const L2 = leg.L2;
 
-      // Law of Cosines for hip-to-thigh angle offset
       let cosAlpha = (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d);
       cosAlpha = Math.max(-1, Math.min(1, cosAlpha));
       const alpha = Math.acos(cosAlpha);
 
-      // Angle from Hip to Pedal
       const beta = Math.atan2(Dy, Dz);
 
       // Forward knee bend towards +Z
@@ -1345,27 +2014,15 @@
       const Kz = Hz + L1 * Math.cos(theta1);
       const Kx = Hx;
 
-      // Align Thigh from Hip to Knee
       _vecA.set(Hx, Hy, Hz);
       _vecB.set(Kx, Ky, Kz);
       alignCylinder(leg.thighMesh, _vecA, _vecB);
 
-      // Position Knee joint
       leg.kneeMesh.position.set(Kx, Ky, Kz);
 
-      // Align Calf from Knee to Pedal
       _vecA.set(Kx, Ky, Kz);
-      _vecB.set(Px, Py, Pz);
+      _vecB.set(Px, Ay, Az);
       alignCylinder(leg.calfMesh, _vecA, _vecB);
-
-      // Align White Sock at the lower portion of the calf
-      _vecA.set(Kx * 0.25 + Px * 0.75, Ky * 0.25 + Py * 0.75, Kz * 0.25 + Pz * 0.75);
-      _vecB.set(Px, Py, Pz);
-      alignCylinder(leg.sockMesh, _vecA, _vecB);
-
-      // Position Road Shoe with slight dynamic ankle flex
-      leg.shoeMesh.position.set(Px, Py - 0.015, Pz + 0.02);
-      leg.shoeMesh.rotation.x = -Math.sin(phi) * 0.18;
     }
 
     // AI Pacer Bots in 3D (Sleek road silhouettes)
@@ -1413,12 +2070,12 @@
         tagCanvas.width = 256;
         tagCanvas.height = 64;
         const tagCtx = tagCanvas.getContext('2d');
-        tagCtx.fillStyle = 'rgba(9, 9, 11, 0.86)';
+        tagCtx.fillStyle = 'rgba(11, 21, 16, 0.88)';
         tagCtx.fillRect(4, 8, 248, 48);
         tagCtx.strokeStyle = botData.color;
         tagCtx.lineWidth = 2.5;
         tagCtx.strokeRect(4, 8, 248, 48);
-        tagCtx.fillStyle = '#f4f4f5';
+        tagCtx.fillStyle = '#F4F7F2';
         tagCtx.font = 'bold 18px sans-serif';
         tagCtx.textAlign = 'center';
         tagCtx.fillText(botData.name, 128, 40);
@@ -1487,7 +2144,7 @@
       updateVisorFrustumScale(window.innerWidth, window.innerHeight);
     }
 
-    // Canvas helper for rounded glass panels with smooth borders
+    // Canvas helper for rounded Deep Forest Ink panels
     function drawGlassPanel(ctx, x, y, w, h, r, borderColor, bgAlpha) {
       ctx.save();
       ctx.beginPath();
@@ -1504,15 +2161,15 @@
         ctx.lineTo(x, y + r);
         ctx.quadraticCurveTo(x, y, x + r, y);
       }
-      ctx.fillStyle = 'rgba(9, 9, 11, ' + (bgAlpha !== undefined ? bgAlpha : 0.84) + ')';
+      ctx.fillStyle = 'rgba(11, 21, 16, ' + (bgAlpha !== undefined ? bgAlpha : 0.86) + ')';
       ctx.fill();
-      ctx.strokeStyle = borderColor || 'rgba(255, 255, 255, 0.18)';
+      ctx.strokeStyle = borderColor || '#1E3328';
       ctx.lineWidth = 2.0;
       ctx.stroke();
       ctx.restore();
     }
 
-    // High-DPI 2D Visor HUD Painter: Full-Viewport Cockpit Layout (Open Center for Cyclist)
+    // High-DPI 2D Visor HUD Painter: LangkahFit Minimalist Cycling Cockpit
     function renderVisorHud(now) {
       if (!hudCtx) return;
       const w = hudCanvas.width;
@@ -1520,341 +2177,403 @@
 
       hudCtx.clearRect(0, 0, w, h);
 
-      const pColor = ZONE_COLORS[state.powerZone] || '#F97316';
+      const pColor = ZONE_COLORS[state.powerZone] || '#C8F04A';
       const hrColor = ZONE_COLORS[state.hrZone] || '#FB7185';
       const pZoneName = ZONE_NAMES[state.powerZone] || 'Z3 TEMPO';
       const gradeColor = state.gradePercent > 4.0 ? '#F43F5E' : (state.gradePercent > 0.0 ? '#FBBF24' : '#34D399');
+      const gradeSign = state.gradePercent >= 0 ? '+' : '';
+      const routeTot = Math.max(100, state.routeTotalMeters || 4000);
+      const routeProgFrac = Math.min(1.0, Math.max(0.0, (state.distanceMeters % routeTot) / routeTot));
+      const pt0 = sampleRouteAtDistance(state.distanceMeters);
+      const upcomingTurn = detectUpcomingTurn(state.distanceMeters);
 
-      const maxDisplayWatts = Math.max(450, state.ftpWatts * 1.5);
-      const powerFraction = Math.min(1.0, Math.max(0.0, state.watts / maxDisplayWatts));
+      // 1. TOP-LEFT LANGKAHFIT STATUS PILL + ROUTE PROGRESS BAR
+      const topPillX = 28;
+      const topPillY = 104;
+      const topPillW = 472;
+      const topPillH = 50;
+      drawGlassPanel(hudCtx, topPillX, topPillY, topPillW, topPillH, 25, '#1E3328', 0.88);
 
-      const cx = w * 0.5;
+      // Static live status dot
+      hudCtx.save();
+      hudCtx.fillStyle = state.watts > 0 ? '#C8F04A' : '#34D399';
+      hudCtx.beginPath();
+      hudCtx.arc(topPillX + 24, topPillY + 23, 5.5, 0, Math.PI * 2);
+      hudCtx.fill();
 
-      // 1. TOP-CENTER FLOATING PILL (Workout Ribbon or Live Turn & Grade Pill)
+      hudCtx.textAlign = 'left';
+      hudCtx.fillStyle = '#F4F7F2';
+      hudCtx.font = 'bold 15px sans-serif';
+      hudCtx.fillText('LazyFit Cyclist', topPillX + 40, topPillY + 28);
+
+      hudCtx.fillStyle = '#C8F04A';
+      hudCtx.font = '900 15px sans-serif';
+      hudCtx.fillText(state.watts + 'W · ' + state.wattsPerKg.toFixed(1) + ' W/kg', topPillX + 168, topPillY + 28);
+
+      hudCtx.textAlign = 'right';
+      hudCtx.fillStyle = '#A9BDB0';
+      hudCtx.font = 'bold 13px sans-serif';
+      const routeLabel = state.activeRouteName.length > 16
+        ? state.activeRouteName.slice(0, 15).toUpperCase() + '...'
+        : state.activeRouteName.toUpperCase();
+      hudCtx.fillText(routeLabel, topPillX + topPillW - 22, topPillY + 28);
+
+      // Electric Lime route progress bar clipped neatly along bottom edge of pill
+      hudCtx.beginPath();
+      if (hudCtx.roundRect) {
+        hudCtx.roundRect(topPillX, topPillY, topPillW, topPillH, 25);
+      } else {
+        hudCtx.rect(topPillX, topPillY, topPillW, topPillH);
+      }
+      hudCtx.clip();
+      hudCtx.fillStyle = 'rgba(30, 51, 40, 0.90)';
+      hudCtx.fillRect(topPillX, topPillY + topPillH - 5, topPillW, 5);
+      hudCtx.fillStyle = '#C8F04A';
+      hudCtx.fillRect(topPillX, topPillY + topPillH - 5, Math.max(12, topPillW * routeProgFrac), 5);
+      hudCtx.restore();
+
+      // Compact Pacer & Drafting Pill below Top-Left Status Pill
+      const pacerPillY = topPillY + 58;
+      drawGlassPanel(
+        hudCtx,
+        topPillX,
+        pacerPillY,
+        340,
+        32,
+        16,
+        state.isDrafting ? '#C8F04A' : '#1E3328',
+        0.82
+      );
+      hudCtx.save();
+      hudCtx.textAlign = 'left';
+      hudCtx.fillStyle = state.isDrafting ? '#C8F04A' : '#A9BDB0';
+      hudCtx.font = 'bold 13px sans-serif';
+      const pacerText = state.isDrafting ? ('DRAFTING · ' + state.nearestBotLabel) : state.nearestBotLabel;
+      hudCtx.fillText(pacerText, topPillX + 16, pacerPillY + 21);
+      hudCtx.restore();
+
+      // 2. TOP-RIGHT / TOP-CENTER RIBBON (Workout Ribbon when Active, or Turn + Grade Pill)
       if (state.isWorkoutActive) {
-        const pillW = 780;
-        const pillH = 88;
-        const pillX = cx - pillW / 2;
-        const pillY = 112;
+        const pillW = 660;
+        const pillH = 84;
+        const pillX = 524;
+        const pillY = 104;
         const isPulse = (state.workoutStepRemainingSec <= 3 || state.isWorkoutPaused) && Math.sin(now * 0.015) > 0;
-        const borderColor = isPulse ? '#F43F5E' : pColor;
+        const borderColor = isPulse ? '#F43F5E' : '#C8F04A';
 
-        drawGlassPanel(hudCtx, pillX, pillY, pillW, pillH, 36, borderColor, 0.90);
+        drawGlassPanel(hudCtx, pillX, pillY, pillW, pillH, 24, borderColor, 0.90);
 
-        // Top accent line in target zone color
         hudCtx.save();
-        hudCtx.fillStyle = isPulse ? '#F43F5E' : pColor;
+        hudCtx.fillStyle = isPulse ? '#F43F5E' : '#C8F04A';
         hudCtx.beginPath();
-        hudCtx.roundRect ? hudCtx.roundRect(pillX + 34, pillY, pillW - 68, 4.5, 2) : hudCtx.rect(pillX + 34, pillY, pillW - 68, 4.5);
+        hudCtx.roundRect ? hudCtx.roundRect(pillX + 26, pillY, pillW - 52, 4, 2) : hudCtx.rect(pillX + 26, pillY, pillW - 52, 4);
         hudCtx.fill();
         hudCtx.restore();
 
-        // Left Section: Step info
         hudCtx.save();
         hudCtx.textAlign = 'left';
-        hudCtx.fillStyle = '#A1A1AA';
-        hudCtx.font = 'bold 14px sans-serif';
+        hudCtx.fillStyle = '#A9BDB0';
+        hudCtx.font = 'bold 13px sans-serif';
         const biasText = state.workoutIntensityBiasPercent !== 0 ? ' (' + (state.workoutIntensityBiasPercent > 0 ? '+' : '') + state.workoutIntensityBiasPercent + '%)' : '';
-        hudCtx.fillText('STEP ' + (state.workoutStepIndex + 1) + ' OF ' + state.workoutTotalSteps + biasText, pillX + 32, pillY + 30);
+        hudCtx.fillText('STEP ' + (state.workoutStepIndex + 1) + ' OF ' + state.workoutTotalSteps + biasText, pillX + 26, pillY + 28);
 
-        hudCtx.fillStyle = '#FFFFFF';
-        hudCtx.font = '900 22px sans-serif';
-        hudCtx.fillText(state.workoutStepName.toUpperCase(), pillX + 32, pillY + 56);
+        hudCtx.fillStyle = '#F4F7F2';
+        hudCtx.font = '900 20px sans-serif';
+        hudCtx.fillText(state.workoutStepName.toUpperCase(), pillX + 26, pillY + 53);
 
-        hudCtx.fillStyle = '#38BDF8';
-        hudCtx.font = 'bold 15px sans-serif';
-        hudCtx.fillText('TARGET ' + state.workoutTargetWatts + 'W @ ' + state.workoutTargetRpm + ' RPM', pillX + 32, pillY + 76);
+        hudCtx.fillStyle = '#C8F04A';
+        hudCtx.font = 'bold 14px sans-serif';
+        hudCtx.fillText('TARGET ' + state.workoutTargetWatts + 'W @ ' + state.workoutTargetRpm + ' RPM', pillX + 26, pillY + 73);
         hudCtx.restore();
 
-        // Center Section: Prominent Countdown Timer
+        const timerCx = pillX + pillW * 0.56;
         hudCtx.save();
         hudCtx.textAlign = 'center';
         const remMins = Math.floor(state.workoutStepRemainingSec / 60);
         const remSecs = state.workoutStepRemainingSec % 60;
         const remStr = String(remMins).padStart(2, '0') + ':' + String(remSecs).padStart(2, '0');
-        hudCtx.fillStyle = isPulse ? '#F43F5E' : '#FFFFFF';
-        hudCtx.font = '900 44px sans-serif';
-        hudCtx.fillText(remStr, cx, pillY + 54);
+        hudCtx.fillStyle = isPulse ? '#F43F5E' : '#F4F7F2';
+        hudCtx.font = '900 40px sans-serif';
+        hudCtx.fillText(remStr, timerCx, pillY + 51);
 
-        hudCtx.fillStyle = isPulse ? '#F43F5E' : '#A1A1AA';
-        hudCtx.font = 'bold 13px sans-serif';
-        hudCtx.fillText(state.isWorkoutPaused ? 'PAUSED' : 'REMAINING', cx, pillY + 74);
+        hudCtx.fillStyle = isPulse ? '#F43F5E' : '#A9BDB0';
+        hudCtx.font = 'bold 12px sans-serif';
+        hudCtx.fillText(state.isWorkoutPaused ? 'PAUSED' : 'REMAINING', timerCx, pillY + 71);
         hudCtx.restore();
 
-        // Right Section: Earned Stars & Compliance
         hudCtx.save();
         hudCtx.textAlign = 'right';
         hudCtx.fillStyle = '#FBBF24';
-        hudCtx.font = 'bold 20px sans-serif';
-        hudCtx.fillText('★ ' + state.workoutEarnedStars, pillX + pillW - 32, pillY + 32);
+        hudCtx.font = 'bold 18px sans-serif';
+        hudCtx.fillText(state.workoutEarnedStars + ' STARS', pillX + pillW - 26, pillY + 30);
 
         hudCtx.fillStyle = '#34D399';
-        hudCtx.font = '900 18px sans-serif';
-        hudCtx.fillText(state.workoutCompliancePercent.toFixed(0) + '% COMPL', pillX + pillW - 32, pillY + 56);
+        hudCtx.font = '900 17px sans-serif';
+        hudCtx.fillText(state.workoutCompliancePercent.toFixed(0) + '% COMPL', pillX + pillW - 26, pillY + 53);
 
         if (state.workoutPacingPrompt) {
-          hudCtx.fillStyle = state.workoutPacingPrompt.indexOf('ON TARGET') !== -1 ? '#34D399' : '#F97316';
-          hudCtx.font = 'bold 13px sans-serif';
-          hudCtx.fillText(state.workoutPacingPrompt, pillX + pillW - 32, pillY + 76);
+          hudCtx.fillStyle = state.workoutPacingPrompt.indexOf('ON TARGET') !== -1 ? '#C8F04A' : '#FBBF24';
+          hudCtx.font = 'bold 12px sans-serif';
+          hudCtx.fillText(state.workoutPacingPrompt, pillX + pillW - 26, pillY + 73);
         }
         hudCtx.restore();
       } else {
-        const pillW = 540;
-        const pillH = 68;
-        const pillX = cx - pillW / 2;
-        const pillY = 114;
-        const upcomingTurn = detectUpcomingTurn(state.distanceMeters);
-        const pillBorder = state.isDrafting ? '#34D399' : 'rgba(255, 255, 255, 0.20)';
-        drawGlassPanel(hudCtx, pillX, pillY, pillW, pillH, 34, pillBorder, 0.86);
+        const turnPillW = 312;
+        const turnPillH = 50;
+        const turnPillX = w - 28 - turnPillW;
+        const turnPillY = 104;
+        drawGlassPanel(hudCtx, turnPillX, turnPillY, turnPillW, turnPillH, 25, '#1E3328', 0.86);
 
-        // Live GPS Pulsing Dot
         hudCtx.save();
-        hudCtx.fillStyle = upcomingTurn.color;
-        hudCtx.beginPath();
-        hudCtx.arc(pillX + 30, pillY + 26, 7, 0, Math.PI * 2);
-        hudCtx.fill();
-
         hudCtx.textAlign = 'left';
         hudCtx.fillStyle = upcomingTurn.color;
-        hudCtx.font = '900 20px sans-serif';
-        hudCtx.fillText(upcomingTurn.label, pillX + 48, pillY + 32);
-
-        hudCtx.fillStyle = state.isDrafting ? '#34D399' : '#D4D4D8';
-        hudCtx.font = 'bold 15px sans-serif';
-        hudCtx.fillText(state.nearestBotLabel, pillX + 48, pillY + 54);
+        hudCtx.font = '900 15px sans-serif';
+        hudCtx.fillText(upcomingTurn.label, turnPillX + 20, turnPillY + 30);
 
         hudCtx.textAlign = 'right';
         hudCtx.fillStyle = gradeColor;
-        hudCtx.font = '900 28px sans-serif';
-        const gSign = state.gradePercent >= 0 ? '+' : '';
-        hudCtx.fillText(gSign + state.gradePercent.toFixed(1) + '%', pillX + pillW - 28, pillY + 44);
+        hudCtx.font = '900 22px sans-serif';
+        hudCtx.fillText(gradeSign + state.gradePercent.toFixed(1) + '%', turnPillX + turnPillW - 20, turnPillY + 32);
         hudCtx.restore();
       }
 
-      // 2. BOTTOM-LEFT FLOATING EFFORT CAPSULE (Watts, Zone, Cadence, HR)
-      const leftCapsuleX = 28;
-      const leftCapsuleY = 392;
-      const capsuleW = 500;
-      const capsuleH = 236;
+      // 3. BOTTOM-LEFT LANGKAHFIT CRISP TYPOGRAPHIC SPEED, POWER & 4-COLUMN STRIP
+      const overlayX = 32;
 
-      drawGlassPanel(hudCtx, leftCapsuleX, leftCapsuleY, capsuleW, capsuleH, 28, 'rgba(255, 255, 255, 0.18)', 0.86);
-
-      // Corner accent indicator
       hudCtx.save();
-      hudCtx.fillStyle = pColor;
-      hudCtx.beginPath();
-      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX, leftCapsuleY + 28, 6, 92, 3) : hudCtx.rect(leftCapsuleX, leftCapsuleY + 28, 6, 92);
-      hudCtx.fill();
+      // Soft borderless radial backdrop gradient contained cleanly inside fillRect (zero hard edges)
+      const softGrad = hudCtx.createRadialGradient(240, 535, 30, 240, 535, 280);
+      softGrad.addColorStop(0.0, 'rgba(11, 21, 16, 0.56)');
+      softGrad.addColorStop(0.60, 'rgba(11, 21, 16, 0.22)');
+      softGrad.addColorStop(1.0, 'rgba(11, 21, 16, 0.0)');
+      hudCtx.fillStyle = softGrad;
+      hudCtx.fillRect(0, 230, 560, 520);
 
-      // Capsule Header
       hudCtx.textAlign = 'left';
-      hudCtx.fillStyle = '#D4D4D8';
-      hudCtx.font = 'bold 15px sans-serif';
-      hudCtx.fillText('EFFORT & VITALS', leftCapsuleX + 28, leftCapsuleY + 34);
+      hudCtx.shadowColor = 'rgba(11, 21, 16, 0.88)';
+      hudCtx.shadowBlur = 6;
+      hudCtx.shadowOffsetY = 2;
 
-      // Hero Watts
+      // Giant Hero Speed in Electric Lime (#C8F04A)
+      const speedText = state.speedKmh.toFixed(1);
+      hudCtx.font = '800 84px "Plus Jakarta Sans", sans-serif';
+      hudCtx.fillStyle = '#C8F04A';
+      hudCtx.fillText(speedText, overlayX, 514);
+      const speedW = hudCtx.measureText(speedText).width;
+
+      hudCtx.font = '700 21px "Plus Jakarta Sans", sans-serif';
+      hudCtx.fillStyle = '#F4F7F2';
+      hudCtx.fillText('km/h', overlayX + speedW + 8, 512);
+
+      // Adjacent Compact Power Readout (clear of cyclist rear wheel)
+      const powerX = overlayX + speedW + 78;
+      const wattsText = String(state.watts);
+      hudCtx.font = '800 48px "Plus Jakarta Sans", sans-serif';
+      hudCtx.fillStyle = '#F4F7F2';
+      hudCtx.fillText(wattsText, powerX, 496);
+      const wattsW = hudCtx.measureText(wattsText).width;
+
+      hudCtx.font = '700 18px "Plus Jakarta Sans", sans-serif';
+      hudCtx.fillStyle = '#C8F04A';
+      hudCtx.fillText('W', powerX + wattsW + 6, 494);
+
+      hudCtx.font = '800 13px "Plus Jakarta Sans", sans-serif';
+      const zoneLine = pZoneName + ' · ' + state.wattsPerKg.toFixed(1) + ' W/kg';
       hudCtx.fillStyle = pColor;
-      hudCtx.font = '900 82px sans-serif';
-      hudCtx.shadowColor = pColor;
-      hudCtx.shadowBlur = 14;
-      hudCtx.fillText(String(state.watts), leftCapsuleX + 26, leftCapsuleY + 116);
+      hudCtx.fillText(zoneLine, powerX, 518);
+
+      // Clean thin horizontal rule above 4-column metric strip
       hudCtx.shadowBlur = 0;
-
-      hudCtx.fillStyle = '#E4E4E7';
-      hudCtx.font = 'bold 17px sans-serif';
-      hudCtx.fillText('W  (' + state.wattsPerKg.toFixed(1) + ' W/KG)', leftCapsuleX + 28, leftCapsuleY + 146);
-
-      // Zone Pill
-      const zonePillW = 176;
-      hudCtx.fillStyle = 'rgba(9, 9, 11, 0.90)';
+      hudCtx.strokeStyle = 'rgba(244, 247, 242, 0.42)';
+      hudCtx.lineWidth = 1.25;
       hudCtx.beginPath();
-      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX + 28, leftCapsuleY + 162, zonePillW, 34, 8) : hudCtx.rect(leftCapsuleX + 28, leftCapsuleY + 162, zonePillW, 34);
-      hudCtx.fill();
-      hudCtx.strokeStyle = pColor;
-      hudCtx.lineWidth = 1.8;
-      hudCtx.stroke();
-      hudCtx.fillStyle = pColor;
-      hudCtx.font = '900 16px sans-serif';
-      hudCtx.textAlign = 'center';
-      hudCtx.fillText(pZoneName, leftCapsuleX + 28 + zonePillW * 0.5, leftCapsuleY + 185);
-
-      // Horizontal Power Progress Bar along bottom of watts section
-      hudCtx.fillStyle = 'rgba(39, 39, 42, 0.90)';
-      hudCtx.beginPath();
-      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX + 28, leftCapsuleY + 210, zonePillW, 8, 4) : hudCtx.rect(leftCapsuleX + 28, leftCapsuleY + 210, zonePillW, 8);
-      hudCtx.fill();
-      hudCtx.fillStyle = pColor;
-      hudCtx.beginPath();
-      hudCtx.roundRect ? hudCtx.roundRect(leftCapsuleX + 28, leftCapsuleY + 210, zonePillW * powerFraction, 8, 4) : hudCtx.rect(leftCapsuleX + 28, leftCapsuleY + 210, zonePillW * powerFraction, 8);
-      hudCtx.fill();
-
-      // Target power marker tick if in workout
-      if (state.isWorkoutActive && state.workoutTargetWatts > 0) {
-        const targetFrac = Math.min(1.0, Math.max(0.0, state.workoutTargetWatts / maxDisplayWatts));
-        hudCtx.fillStyle = '#FFFFFF';
-        hudCtx.fillRect(leftCapsuleX + 28 + zonePillW * targetFrac - 1.5, leftCapsuleY + 206, 3, 16);
-      }
-
-      // Vertical Divider
-      hudCtx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
-      hudCtx.lineWidth = 1.5;
-      hudCtx.beginPath();
-      hudCtx.moveTo(leftCapsuleX + 228, leftCapsuleY + 28);
-      hudCtx.lineTo(leftCapsuleX + 228, leftCapsuleY + 214);
+      hudCtx.moveTo(overlayX, 540);
+      hudCtx.lineTo(overlayX + 468, 540);
       hudCtx.stroke();
 
-      // Cadence (RPM)
-      const rightColX = leftCapsuleX + 252;
-      hudCtx.textAlign = 'left';
-      hudCtx.fillStyle = '#D4D4D8';
-      hudCtx.font = 'bold 14px sans-serif';
-      hudCtx.fillText('CADENCE', rightColX, leftCapsuleY + 54);
-
-      hudCtx.fillStyle = '#38BDF8';
-      hudCtx.font = '900 48px sans-serif';
-      hudCtx.fillText(String(state.rpm), rightColX, leftCapsuleY + 104);
-      hudCtx.fillStyle = '#E4E4E7';
-      hudCtx.font = 'bold 17px sans-serif';
-      hudCtx.fillText('RPM', rightColX + 105, leftCapsuleY + 100);
-
-      // Heart Rate (BPM)
-      const hrBpm = state.bpm > 0 ? state.bpm : '--';
-      const heartPulse = 1.0 + (Math.sin(now * 0.009) * 0.14);
-      hudCtx.fillStyle = '#D4D4D8';
-      hudCtx.font = 'bold 14px sans-serif';
-      hudCtx.fillText('HEART RATE', rightColX, leftCapsuleY + 144);
-
-      hudCtx.fillStyle = hrColor;
-      hudCtx.font = '900 48px sans-serif';
-      hudCtx.fillText(String(hrBpm), rightColX, leftCapsuleY + 194);
-      hudCtx.fillStyle = '#E4E4E7';
-      hudCtx.font = 'bold 17px sans-serif';
-      hudCtx.fillText('BPM', rightColX + 105, leftCapsuleY + 190);
-
-      // Mini Cardiac waveform
-      hudCtx.strokeStyle = hrColor;
-      hudCtx.lineWidth = 2.5;
-      hudCtx.beginPath();
-      const waveX = rightColX;
-      const waveY = leftCapsuleY + 214;
-      hudCtx.moveTo(waveX, waveY);
-      hudCtx.lineTo(waveX + 42, waveY);
-      hudCtx.lineTo(waveX + 56, waveY - 11 * heartPulse);
-      hudCtx.lineTo(waveX + 70, waveY + 11 * heartPulse);
-      hudCtx.lineTo(waveX + 84, waveY);
-      hudCtx.lineTo(waveX + 210, waveY);
-      hudCtx.stroke();
-      hudCtx.restore();
-
-      // 3. BOTTOM-RIGHT FLOATING COURSE CAPSULE (Speed, Distance, Grade, Elevation)
-      const rightCapsuleX = w - leftCapsuleX - capsuleW;
-      const rightCapsuleY = leftCapsuleY;
-
-      drawGlassPanel(hudCtx, rightCapsuleX, rightCapsuleY, capsuleW, capsuleH, 28, 'rgba(255, 255, 255, 0.18)', 0.86);
-
-      // Header
-      hudCtx.save();
-      hudCtx.textAlign = 'left';
-      hudCtx.fillStyle = '#D4D4D8';
-      hudCtx.font = 'bold 15px sans-serif';
-      hudCtx.fillText('COURSE TELEMETRY', rightCapsuleX + 28, rightCapsuleY + 34);
-
-      const courseTurn = detectUpcomingTurn(state.distanceMeters);
-      hudCtx.textAlign = 'right';
-      hudCtx.fillStyle = courseTurn.color;
-      hudCtx.font = '900 15px sans-serif';
-      hudCtx.fillText(courseTurn.label, rightCapsuleX + capsuleW - 26, rightCapsuleY + 34);
-      hudCtx.textAlign = 'left';
-
-      // Hero Speed
-      hudCtx.fillStyle = '#FFFFFF';
-      hudCtx.font = '900 78px sans-serif';
-      hudCtx.fillText(state.speedKmh.toFixed(1), rightCapsuleX + 26, rightCapsuleY + 114);
-      hudCtx.fillStyle = '#E4E4E7';
-      hudCtx.font = 'bold 17px sans-serif';
-      hudCtx.fillText('KM / H', rightCapsuleX + 28, rightCapsuleY + 144);
-
-      // Distance & Elapsed Time
+      // 4-Column Tabular Metric Row (crisp un-stroked labels & values)
       const mins = Math.floor(state.elapsedSeconds / 60);
       const secs = state.elapsedSeconds % 60;
       const timeStr = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
-      hudCtx.fillStyle = '#F4F4F5';
-      hudCtx.font = '900 22px sans-serif';
-      hudCtx.fillText((state.distanceMeters / 1000).toFixed(2) + ' KM', rightCapsuleX + 28, rightCapsuleY + 182);
-      hudCtx.fillStyle = '#D4D4D8';
-      hudCtx.font = 'bold 17px sans-serif';
-      hudCtx.fillText('TIME ' + timeStr, rightCapsuleX + 28, rightCapsuleY + 212);
+      const hrDisplay = state.bpm > 0 ? (state.bpm + ' bpm') : '--';
+      const metricCols = [
+        { label: 'DISTANCE', value: (state.distanceMeters / 1000).toFixed(2) + ' km', color: '#F4F7F2' },
+        { label: 'TIME', value: timeStr, color: '#F4F7F2' },
+        { label: 'CADENCE', value: state.rpm + ' rpm', color: '#C8F04A' },
+        { label: 'HEART RATE', value: hrDisplay, color: hrColor }
+      ];
 
-      // Vertical Divider
-      hudCtx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
-      hudCtx.lineWidth = 1.5;
+      hudCtx.shadowColor = 'rgba(11, 21, 16, 0.90)';
+      hudCtx.shadowBlur = 5;
+      for (let m = 0; m < metricCols.length; m++) {
+        const colX = overlayX + m * 118;
+        hudCtx.font = '700 11px "Plus Jakarta Sans", sans-serif';
+        hudCtx.fillStyle = '#D7E5DA';
+        hudCtx.fillText(metricCols[m].label, colX, 566);
+
+        hudCtx.font = '800 21px "Plus Jakarta Sans", sans-serif';
+        hudCtx.fillStyle = metricCols[m].color;
+        hudCtx.fillText(metricCols[m].value, colX, 596);
+      }
+      hudCtx.restore();
+
+      // 4. BOTTOM-RIGHT ROUNDED 2D MINI-MAP CARD
+      const mapW = 224;
+      const mapH = 198;
+      const mapX = w - 28 - mapW;
+      const mapY = 428;
+      const mapR = 18;
+
+      hudCtx.save();
       hudCtx.beginPath();
-      hudCtx.moveTo(rightCapsuleX + 236, rightCapsuleY + 46);
-      hudCtx.lineTo(rightCapsuleX + 236, rightCapsuleY + 214);
-      hudCtx.stroke();
+      if (hudCtx.roundRect) {
+        hudCtx.roundRect(mapX, mapY, mapW, mapH, mapR);
+      } else {
+        hudCtx.rect(mapX, mapY, mapW, mapH);
+      }
+      hudCtx.clip();
 
-      // Road Grade
-      const gradeColX = rightCapsuleX + 258;
-      hudCtx.fillStyle = '#D4D4D8';
-      hudCtx.font = 'bold 14px sans-serif';
-      hudCtx.fillText('ROAD GRADE', gradeColX, rightCapsuleY + 62);
+      // Mini-map daylight sage terrain background + lakeside water corner
+      hudCtx.fillStyle = '#6E8F58';
+      hudCtx.fillRect(mapX, mapY, mapW, mapH);
 
-      hudCtx.fillStyle = gradeColor;
-      hudCtx.font = '900 44px sans-serif';
-      const gradeSign = state.gradePercent >= 0 ? '+' : '';
-      hudCtx.fillText(gradeSign + state.gradePercent.toFixed(1) + '%', gradeColX, rightCapsuleY + 112);
-
-      // Mini Elevation Profile Ribbon (Dynamic from active routeWaypoints)
-      const pX = gradeColX;
-      const pY = rightCapsuleY + 206;
-      const profW = 212;
-      const profH = 54;
-
-      hudCtx.fillStyle = 'rgba(39, 39, 42, 0.75)';
+      hudCtx.fillStyle = '#6FA3D2';
       hudCtx.beginPath();
-      hudCtx.roundRect ? hudCtx.roundRect(pX, rightCapsuleY + 136, profW, 78, 10) : hudCtx.rect(pX, rightCapsuleY + 136, profW, 78);
+      hudCtx.moveTo(mapX, mapY);
+      hudCtx.lineTo(mapX + mapW * 0.56, mapY);
+      hudCtx.quadraticCurveTo(mapX + mapW * 0.42, mapY + mapH * 0.45, mapX, mapY + mapH * 0.62);
+      hudCtx.closePath();
       hudCtx.fill();
 
+      // Fit routeWaypoints into mini-map bounds
       const wps = (Array.isArray(routeWaypoints) && routeWaypoints.length >= 2)
         ? routeWaypoints
-        : [[0,0,724],[0,0,860],[0,0,1118],[0,0,1420],[0,0,1815]];
-      let minEle = Infinity;
-      let maxEle = -Infinity;
-      for (let i = 0; i < wps.length; i++) {
-        const ele = Number(wps[i][2]) || 0;
-        if (ele < minEle) minEle = ele;
-        if (ele > maxEle) maxEle = ele;
-      }
-      const eleSpan = Math.max(15, maxEle - minEle);
+        : [[45.0592, 6.0358, 724], [45.0655, 6.0431, 860], [45.0721, 6.0472, 1118], [45.0924, 6.0706, 1815]];
 
-      hudCtx.strokeStyle = '#F97316';
-      hudCtx.lineWidth = 3;
+      let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+      for (let i = 0; i < wps.length; i++) {
+        const wLat = Number(wps[i][0]) || 0;
+        const wLon = Number(wps[i][1]) || 0;
+        if (wLat < minLat) minLat = wLat;
+        if (wLat > maxLat) maxLat = wLat;
+        if (wLon < minLon) minLon = wLon;
+        if (wLon > maxLon) maxLon = wLon;
+      }
+      const latSpan = Math.max(0.0008, maxLat - minLat);
+      const lonSpan = Math.max(0.0008, maxLon - minLon);
+      const pad = 22;
+      const innerMapW = mapW - pad * 2;
+      const innerMapH = (mapH - 28) - pad * 2;
+
+      function mapProject(pLat, pLon) {
+        return {
+          x: mapX + pad + ((pLon - minLon) / lonSpan) * innerMapW,
+          y: mapY + pad + (1.0 - (pLat - minLat) / latSpan) * innerMapH
+        };
+      }
+
+      // Route dark outline + upcoming light track
+      hudCtx.lineCap = 'round';
+      hudCtx.lineJoin = 'round';
       hudCtx.beginPath();
       for (let i = 0; i < wps.length; i++) {
-        const xFrac = i / (wps.length - 1);
-        const yFrac = ((Number(wps[i][2]) || 0) - minEle) / eleSpan;
-        const wx = pX + 6 + xFrac * (profW - 12);
-        const wy = (pY - 6) - yFrac * profH;
-        if (i === 0) hudCtx.moveTo(wx, wy);
-        else hudCtx.lineTo(wx, wy);
+        const p = mapProject(Number(wps[i][0]) || 0, Number(wps[i][1]) || 0);
+        if (i === 0) hudCtx.moveTo(p.x, p.y);
+        else hudCtx.lineTo(p.x, p.y);
       }
+      hudCtx.strokeStyle = 'rgba(11, 21, 16, 0.72)';
+      hudCtx.lineWidth = 7;
       hudCtx.stroke();
 
-      // Rider dot on elevation profile
-      const routeTot = Math.max(100, state.routeTotalMeters || 4000);
-      const progFrac = Math.min(1.0, Math.max(0.0, (state.distanceMeters % routeTot) / routeTot));
-      const profDotX = pX + 6 + progFrac * (profW - 12);
-      const floatIdx = progFrac * (wps.length - 1);
-      const idx0 = Math.floor(floatIdx);
-      const idx1 = Math.min(wps.length - 1, idx0 + 1);
-      const tIdx = floatIdx - idx0;
-      const interpEle = (Number(wps[idx0][2]) || 0) * (1 - tIdx) + (Number(wps[idx1][2]) || 0) * tIdx;
-      const profDotY = (pY - 6) - ((interpEle - minEle) / eleSpan) * profH;
+      hudCtx.strokeStyle = '#F4F7F2';
+      hudCtx.lineWidth = 3.5;
+      hudCtx.stroke();
 
-      hudCtx.fillStyle = '#FFFFFF';
+      // Completed Electric Lime route trace up to current rider position
+      let closestIdx = 0;
+      let minSq = Infinity;
+      for (let i = 0; i < wps.length; i++) {
+        const dLat = (Number(wps[i][0]) || 0) - state.lat;
+        const dLon = (Number(wps[i][1]) || 0) - state.lon;
+        const sq = dLat * dLat + dLon * dLon;
+        if (sq < minSq) {
+          minSq = sq;
+          closestIdx = i;
+        }
+      }
+      const riderPt = mapProject(state.lat, state.lon);
       hudCtx.beginPath();
-      hudCtx.arc(profDotX, profDotY, 6, 0, Math.PI * 2);
+      for (let i = 0; i <= closestIdx; i++) {
+        const p = mapProject(Number(wps[i][0]) || 0, Number(wps[i][1]) || 0);
+        if (i === 0) hudCtx.moveTo(p.x, p.y);
+        else hudCtx.lineTo(p.x, p.y);
+      }
+      hudCtx.lineTo(riderPt.x, riderPt.y);
+      hudCtx.strokeStyle = '#C8F04A';
+      hudCtx.lineWidth = 4;
+      hudCtx.stroke();
+
+      // White checkpoint dots along the route
+      const numCheckpoints = Math.min(8, wps.length);
+      for (let c = 0; c < numCheckpoints; c++) {
+        const idx = Math.floor((c / Math.max(1, numCheckpoints - 1)) * (wps.length - 1));
+        const cp = mapProject(Number(wps[idx][0]) || 0, Number(wps[idx][1]) || 0);
+        hudCtx.fillStyle = '#F4F7F2';
+        hudCtx.beginPath();
+        hudCtx.arc(cp.x, cp.y, 3.2, 0, Math.PI * 2);
+        hudCtx.fill();
+        hudCtx.strokeStyle = '#0B1510';
+        hudCtx.lineWidth = 1.2;
+        hudCtx.stroke();
+      }
+
+      // Pacer Bot dots on mini-map
+      for (let b = 0; b < bots.length; b++) {
+        const botSample = sampleRouteAtDistance(bots[b].dist);
+        const bp = mapProject(botSample.lat, botSample.lon);
+        hudCtx.fillStyle = bots[b].color;
+        hudCtx.beginPath();
+        hudCtx.arc(bp.x, bp.y, 3.5, 0, Math.PI * 2);
+        hudCtx.fill();
+      }
+
+      // Rider beacon on mini-map
+      hudCtx.fillStyle = 'rgba(200, 240, 74, 0.42)';
+      hudCtx.beginPath();
+      hudCtx.arc(riderPt.x, riderPt.y, 10, 0, Math.PI * 2);
       hudCtx.fill();
+      hudCtx.fillStyle = '#C8F04A';
+      hudCtx.beginPath();
+      hudCtx.arc(riderPt.x, riderPt.y, 5.5, 0, Math.PI * 2);
+      hudCtx.fill();
+      hudCtx.strokeStyle = '#0B1510';
+      hudCtx.lineWidth = 2;
+      hudCtx.stroke();
+
+      // Mini-map bottom grade & route elevation strip
+      hudCtx.fillStyle = 'rgba(11, 21, 16, 0.90)';
+      hudCtx.fillRect(mapX, mapY + mapH - 28, mapW, 28);
+      hudCtx.textAlign = 'left';
+      hudCtx.fillStyle = '#A9BDB0';
+      hudCtx.font = 'bold 11px sans-serif';
+      hudCtx.fillText(Math.round(pt0.ele) + 'm ELE', mapX + 12, mapY + mapH - 10);
+      hudCtx.textAlign = 'right';
+      hudCtx.fillStyle = '#C8F04A';
+      hudCtx.font = '900 12px sans-serif';
+      hudCtx.fillText(gradeSign + state.gradePercent.toFixed(1) + '% GRADE', mapX + mapW - 12, mapY + mapH - 10);
+      hudCtx.restore();
+
+      // Mini-map card border stroke
+      hudCtx.save();
+      hudCtx.beginPath();
+      if (hudCtx.roundRect) {
+        hudCtx.roundRect(mapX, mapY, mapW, mapH, mapR);
+      } else {
+        hudCtx.rect(mapX, mapY, mapW, mapH);
+      }
+      hudCtx.strokeStyle = '#1E3328';
+      hudCtx.lineWidth = 2.5;
+      hudCtx.stroke();
       hudCtx.restore();
 
       // Signal Three.js that texture needs update
@@ -1867,35 +2586,79 @@
     function updateWorldGeometry(localDist) {
       const pt0 = sampleRouteAtDistance(localDist);
 
-      // 1. Scroll Road Texture
+      // 1. Scroll Road, Grass, Lake & Stone Wall Textures smoothly
       if (roadTexture) {
         roadTexture.offset.y = -(localDist * 0.1) % 1;
       }
-
-      // 2. Deform Road Ribbon Vertices along -Z using real GPS route geometry & elevation
-      if (roadMesh && roadMesh.geometry.userData.basePositions) {
-        const pos = roadMesh.geometry.attributes.position;
-        const base = roadMesh.geometry.userData.basePositions;
-        for (let i = 0; i < pos.count; i++) {
-          const bX = base[i * 3];
-          const bZ = base[i * 3 + 2];
-          const d = -bZ; // Distance ahead of rider along -Z
-          const relD = Math.max(0, d);
-          const proj = projectRoadOffsetAhead(localDist, relD, pt0);
-          pos.setX(i, bX + proj.curveX);
-          pos.setY(i, proj.slopeY);
-        }
-        pos.needsUpdate = true;
+      if (grassTexture) {
+        grassTexture.offset.y = -(localDist * 0.1) % 1;
+      }
+      if (lakeTexture) {
+        lakeTexture.offset.y = -(localDist * 0.08) % 1;
+      }
+      if (stoneTexture) {
+        stoneTexture.offset.x = (localDist * 0.2) % 1;
       }
 
-      // 3. Scroll Trees along -Z following real GPS road curves & elevation
+      // Keep sky dome mountain horizon aligned with climbing/descending road horizon
+      if (skyDome) {
+        const endProj = projectRoadOffsetAhead(localDist, 220, pt0);
+        skyDome.position.set(0, endProj.slopeY * 0.45, -100);
+      }
+
+      // 2. Deform Continuous Ribbons (Road, Guardrails, Stone Wall, Hillside, Lake) along -Z
+      const deformRibbon = function(mesh, yOffset, withHillSlope) {
+        if (!mesh || !mesh.geometry.userData || !mesh.geometry.userData.basePositions) return;
+        const pos = mesh.geometry.attributes.position;
+        const base = mesh.geometry.userData.basePositions;
+        for (let i = 0; i < pos.count; i++) {
+          const bX = base[i * 3];
+          const bY = base[i * 3 + 1];
+          const bZ = base[i * 3 + 2];
+          const relD = -bZ; // Signed distance ahead (+ ahead, - behind)
+          const proj = projectRoadOffsetAhead(localDist, relD, pt0);
+          let hillOffset = 0;
+          if (withHillSlope) {
+            const distPastShoulder = Math.max(0, bX - 4.2);
+            hillOffset = distPastShoulder * 0.18 + Math.sin(bX * 0.09 + (localDist + relD) * 0.035) * 0.55;
+          }
+          pos.setX(i, bX + proj.curveX);
+          pos.setY(i, bY + proj.slopeY + yOffset + hillOffset);
+        }
+        pos.needsUpdate = true;
+      };
+
+      deformRibbon(roadMesh, 0, false);
+      deformRibbon(groundMesh, -0.05, true);
+      deformRibbon(lakeMesh, -0.58, false);
+      deformRibbon(stoneWallMesh, 0, false);
+      deformRibbon(stoneWallOuterMesh, 0, false);
+      deformRibbon(stoneWallTopMesh, 0, false);
+      deformRibbon(leftRailFaceMesh, 0, false);
+      deformRibbon(leftRailTopMesh, 0, false);
+      deformRibbon(rightRailFaceMesh, 0, false);
+      deformRibbon(rightRailTopMesh, 0, false);
+
+      // 3. Scroll Pine Trees along the contoured right hillside
       if (treesGroup) {
         for (let i = 0; i < treesGroup.children.length; i++) {
           const tree = treesGroup.children[i];
           const d = ((tree.userData.baseDist - (localDist % 240)) + 240) % 240 - 10;
-          const relD = Math.max(0, d);
-          const proj = projectRoadOffsetAhead(localDist, relD, pt0);
-          tree.position.set(proj.curveX + tree.userData.side * tree.userData.lateral, proj.slopeY, -d);
+          const proj = projectRoadOffsetAhead(localDist, d, pt0);
+          const lateral = tree.userData.side * tree.userData.lateral;
+          const distPastShoulder = Math.max(0, lateral - 4.2);
+          const hillY = distPastShoulder * 0.18 + Math.sin(lateral * 0.09 + (localDist + d) * 0.035) * 0.55 - 0.12;
+          tree.position.set(proj.curveX + lateral, proj.slopeY + hillY, -d);
+        }
+      }
+
+      // 3b. Scroll Cylindrical Steel Guardrail Posts smoothly along road curves & slopes
+      if (guardrailPostsGroup) {
+        for (let i = 0; i < guardrailPostsGroup.children.length; i++) {
+          const pair = guardrailPostsGroup.children[i];
+          const d = ((pair.userData.baseDist - (localDist % 240)) + 240) % 240 - 10;
+          const proj = projectRoadOffsetAhead(localDist, d, pt0);
+          pair.position.set(proj.curveX, proj.slopeY, -d);
         }
       }
 
@@ -1976,7 +2739,11 @@
           const targetCurve = turnInfo.turnRate * (0.35 + 0.65 * speedLeanFactor);
           smoothedTurnRate += (targetCurve - smoothedTurnRate) * Math.min(1.0, 5.0 * dt);
           const currentCurve = smoothedTurnRate;
-          const currentSlope = state.gradePercent * 0.05;
+
+          const projFront = projectRoadOffsetAhead(localDist, 0.55);
+          const projRear = projectRoadOffsetAhead(localDist, -0.50);
+          const roadPitchRad = Math.max(-0.32, Math.min(0.32, Math.atan2(projFront.slopeY - projRear.slopeY, 1.05)));
+          const roadBaseY = (projFront.slopeY * 0.50 + projRear.slopeY * 0.55) / 1.05;
 
           // 1. Update Cyclist and Bike
           if (frontWheel && rearWheel) {
@@ -1986,44 +2753,52 @@
           if (crankGroup) {
             crankGroup.rotation.x = state.crankAngleRad;
           }
+          if (leftPedal && rightPedal) {
+            leftPedal.rotation.x = -state.crankAngleRad;
+            rightPedal.rotation.x = -state.crankAngleRad;
+          }
           if (leftLegData && rightLegData) {
             updateLegIK(leftLegData, state.crankAngleRad);
             updateLegIK(rightLegData, state.crankAngleRad);
           }
-          if (cyclistGroup) {
-            cyclistGroup.rotation.z = Math.sin(state.crankAngleRad) * 0.035;
+          if (cyclistUpperBody) {
+            const cadenceFade = Math.min(1.0, Math.max(0.0, (state.rpm - 5) / 45));
+            cyclistUpperBody.rotation.z = Math.sin(state.crankAngleRad) * 0.016 * cadenceFade;
+            cyclistUpperBody.rotation.x = Math.sin(state.crankAngleRad * 2) * 0.008 * cadenceFade;
           }
           if (bikeGroup) {
-            // Bike lean into corners (facing -Z)
-            const bikeLean = -currentCurve * 0.35;
+            // Bike leans into corners (+rotation.z banks world +X on right turns with Ry = PI)
+            // and pitches along the local road slope tangent (+rotation.x lifts front wheel at world -Z)
+            const bikeLean = currentCurve * 0.28;
             bikeGroup.rotation.z = bikeLean;
-            bikeGroup.rotation.x = -currentSlope * 0.5;
+            bikeGroup.rotation.x = roadPitchRad;
             bikeGroup.position.x = currentCurve * 0.35;
+            bikeGroup.position.y = roadBaseY;
           }
 
           // 2. Deform Road & Scroll Scenery along -Z
           updateWorldGeometry(localDist);
 
           // 3. Update Camera Modes & Dynamic Inertia (Camera points toward -Z)
-          const targetPitch = -currentSlope * 0.4;
-          const targetRoll = -currentCurve * 0.15;
+          const targetPitch = roadPitchRad * 0.55;
+          const targetRoll = -currentCurve * 0.08;
           cameraInertiaPitch += (targetPitch - cameraInertiaPitch) * 4.0 * dt;
           cameraInertiaRoll += (targetRoll - cameraInertiaRoll) * 4.0 * dt;
 
           if (state.cameraMode === 'POV') {
             // First-person cockpit: looking forward over the drops toward -Z
-            cameraRig.position.set(bikeGroup.position.x, 1.35, -0.15);
+            cameraRig.position.set(bikeGroup.position.x, 1.35 + roadBaseY, -0.15);
             camera.position.set(0, 0, 0);
             camera.rotation.set(cameraInertiaPitch, 0, cameraInertiaRoll);
           } else if (state.cameraMode === 'DRONE') {
             // Elevated overview behind (+Z) looking down forward (-Z)
-            cameraRig.position.set(bikeGroup.position.x * 0.6, 4.8, 8.5);
+            cameraRig.position.set(bikeGroup.position.x * 0.6, 4.8 + roadBaseY, 8.5);
             camera.position.set(0, 0, 0);
             camera.rotation.set(-0.32 + cameraInertiaPitch * 0.5, 0, cameraInertiaRoll * 0.5);
           } else {
             // Dynamic 3/4 CHASE Mode: Lateral offset (+0.65m X) and slightly elevated,
             // revealing bicycle frame, deep wheels, curved spine, and 2-segment leg articulation
-            cameraRig.position.set(bikeGroup.position.x * 0.75 + 0.65, 1.68, 3.35);
+            cameraRig.position.set(bikeGroup.position.x * 0.75 + 0.65, 1.68 + roadBaseY, 3.35);
             camera.position.set(0, 0, 0);
             camera.rotation.set(-0.11 + cameraInertiaPitch, -0.16 + cameraInertiaRoll * 0.5, cameraInertiaRoll);
           }

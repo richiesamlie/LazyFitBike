@@ -186,11 +186,12 @@ class MainActivity : ComponentActivity() {
 }
 
 private val BgPureBlack = Color(0xFF000000)
-private val SurfaceZinc = Color(0xFF18181B)
-private val BorderZinc = Color(0xFF27272A)
-private val TextWhite = Color(0xFFF4F4F5)
-private val TextMutedZinc = Color(0xFFA1A1AA)
-private val AccentOrange = Color(0xFFF97316)
+private val SurfaceZinc = Color(0xFF13221A)
+private val BorderZinc = Color(0xFF1E3328)
+private val TextWhite = Color(0xFFF4F7F2)
+private val TextMutedZinc = Color(0xFFA9BDB0)
+private val AccentLime = Color(0xFFC8F04A)
+private val InkDark = Color(0xFF0B1510)
 private val SignalRose = Color(0xFFFB7185)
 private val SignalEmerald = Color(0xFF34D399)
 private val SignalAmber = Color(0xFFFBBF24)
@@ -264,14 +265,14 @@ fun WatchSensorScreen(
                 }
                 Text(
                     text = pulseText,
-                    color = Color(0xFF52525B), // Dim zinc text
+                    color = TextMutedZinc,
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,
                     style = TabularStyle
                 )
                 Text(
                     text = "AMOLED ECO · TAP TO WAKE",
-                    color = Color(0xFF3F3F46),
+                    color = Zone1Gray,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -316,7 +317,7 @@ fun WatchSensorScreen(
                         style = TabularStyle
                     )
                     Text(
-                        text = " • $remTime",
+                        text = " · $remTime",
                         color = TextWhite,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -350,7 +351,7 @@ fun WatchSensorScreen(
                     }
                     Text(
                         text = modeText,
-                        color = AccentOrange,
+                        color = AccentLime,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -410,7 +411,7 @@ fun WatchSensorScreen(
                 if (state.isWorkoutActive && state.targetRpm > 0) {
                     Text(
                         text = "TARGET: ${state.targetRpm} RPM",
-                        color = AccentOrange,
+                        color = AccentLime,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         style = TabularStyle
@@ -457,14 +458,14 @@ fun WatchSensorScreen(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .background(SurfaceZinc)
-                            .border(1.dp, AccentOrange, RoundedCornerShape(8.dp))
+                            .border(1.dp, AccentLime, RoundedCornerShape(8.dp))
                             .clickable { onTriggerGithubUpdate() }
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text(
                             text = updateStatus,
                             style = TabularStyle,
-                            color = AccentOrange,
+                            color = AccentLime,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -502,14 +503,14 @@ fun WatchSensorScreen(
                         .heightIn(min = 48.dp),
                     shape = RoundedCornerShape(50),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (state.isActive) BorderZinc else AccentOrange,
-                        contentColor = TextWhite
+                        containerColor = if (state.isActive) BorderZinc else AccentLime,
+                        contentColor = if (state.isActive) TextWhite else InkDark
                     )
                 ) {
                     Text(
                         text = if (state.isActive) "Stop" else "Start",
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Black
                     )
                 }
             }

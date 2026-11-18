@@ -23,8 +23,8 @@ import kotlin.math.roundToInt
 
 /**
  * Generates high-resolution 1080x1920 (9:16) social story graphics for Instagram, Strava, and Canva.
- * Follows the high-contrast performance cockpit design language (DESIGN.md):
- * Carbon matte #09090B, Velodrome Orange #F97316 accent, Emerald status #34D399, crisp tabular numerals.
+ * Follows the LangkahFit-inspired cycling design language (DESIGN.md):
+ * Deep Forest Ink #0B1510, Forest Surface #13221A, Electric Lime #C8F04A accent, Emerald status #34D399, crisp tabular numerals.
  */
 object CanvaShareCardGenerator {
 
@@ -48,27 +48,17 @@ object CanvaShareCardGenerator {
         val bitmap = Bitmap.createBitmap(CARD_WIDTH, CARD_HEIGHT, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        // 1. Solid Matte Background (#09090B)
-        canvas.drawColor(Color.parseColor("#09090B"))
-
-        // Subtle tech grid lines
-        val gridPaint = Paint().apply {
-            color = Color.parseColor("#18181B")
-            strokeWidth = 2f
-            style = Paint.Style.STROKE
-        }
-        for (y in 0..CARD_HEIGHT step 120) {
-            canvas.drawLine(0f, y.toFloat(), CARD_WIDTH.toFloat(), y.toFloat(), gridPaint)
-        }
+        // 1. Solid Deep Forest Ink Background (#0B1510)
+        canvas.drawColor(Color.parseColor("#0B1510"))
 
         // 2. Header: App Branding & Status
         val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#71717A")
+            color = Color.parseColor("#A9BDB0")
             textSize = 28f
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-            letterSpacing = 0.2f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            letterSpacing = 0.12f
         }
-        canvas.drawText("LAZYFITBIKE • 3D INDOOR CYCLING", 80f, 130f, headerPaint)
+        canvas.drawText("LAZYFITBIKE · 3D INDOOR CYCLING", 80f, 130f, headerPaint)
 
         // Connected status pill
         val statusPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -78,7 +68,7 @@ object CanvaShareCardGenerator {
         canvas.drawCircle(80f, 180f, 10f, statusPaint)
 
         val statusTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#A1A1AA")
+            color = Color.parseColor("#A9BDB0")
             textSize = 26f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
         }
@@ -87,7 +77,7 @@ object CanvaShareCardGenerator {
         // Date
         val dateStr = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.US).format(Date())
         val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#71717A")
+            color = Color.parseColor("#A9BDB0")
             textSize = 24f
             textAlign = Paint.Align.RIGHT
         }
@@ -95,27 +85,27 @@ object CanvaShareCardGenerator {
 
         // 3. Hero Route Title
         val routeTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#F4F4F5")
+            color = Color.parseColor("#F4F7F2")
             textSize = 68f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         canvas.drawText(routeName.uppercase(Locale.US), 80f, 290f, routeTitlePaint)
 
         val regionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#F97316")
+            color = Color.parseColor("#C8F04A")
             textSize = 32f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
-        canvas.drawText("📍 $routeRegion • ${summary.workoutName}", 80f, 345f, regionPaint)
+        canvas.drawText("$routeRegion · ${summary.workoutName}", 80f, 345f, regionPaint)
 
         // 4. Hero Normalized Power Card
         val heroRect = RectF(80f, 390f, (CARD_WIDTH - 80).toFloat(), 640f)
         val heroBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#121215")
+            color = Color.parseColor("#13221A")
             style = Paint.Style.FILL
         }
         val heroBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#F97316")
+            color = Color.parseColor("#C8F04A")
             style = Paint.Style.STROKE
             strokeWidth = 3f
         }
@@ -123,21 +113,21 @@ object CanvaShareCardGenerator {
         canvas.drawRoundRect(heroRect, 24f, 24f, heroBorderPaint)
 
         val heroLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#A1A1AA")
+            color = Color.parseColor("#A9BDB0")
             textSize = 28f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         canvas.drawText("NORMALIZED POWER", 120f, 450f, heroLabelPaint)
 
         val heroWattsPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#F97316")
+            color = Color.parseColor("#C8F04A")
             textSize = 120f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         canvas.drawText("${summary.normalizedPowerWatts}", 120f, 570f, heroWattsPaint)
 
         val unitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#F4F4F5")
+            color = Color.parseColor("#F4F7F2")
             textSize = 42f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
@@ -149,7 +139,7 @@ object CanvaShareCardGenerator {
             textSize = 34f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
-        canvas.drawText(String.format(Locale.US, "%.1f W/kg  •  IF %.2f", wKg, summary.intensityFactor), 360f, 580f, wKgPaint)
+        canvas.drawText(String.format(Locale.US, "%.1f W/kg  ·  IF %.2f", wKg, summary.intensityFactor), 360f, 580f, wKgPaint)
 
         // 5. 2x3 Metric Grid
         val gridYStart = 680f
@@ -173,11 +163,11 @@ object CanvaShareCardGenerator {
             val rect = RectF(x, y, x + colW, y + rowH)
 
             val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#18181B")
+                color = Color.parseColor("#13221A")
                 style = Paint.Style.FILL
             }
             val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#27272A")
+                color = Color.parseColor("#1E3328")
                 style = Paint.Style.STROKE
                 strokeWidth = 2f
             }
@@ -186,21 +176,21 @@ object CanvaShareCardGenerator {
 
             val (lbl, valStr, unit) = metrics[i]
             val mLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#71717A")
+                color = Color.parseColor("#A9BDB0")
                 textSize = 22f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
             canvas.drawText(lbl, x + 24f, y + 42f, mLabelPaint)
 
             val mValPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#F4F4F5")
+                color = Color.parseColor("#F4F7F2")
                 textSize = 50f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
             canvas.drawText(valStr, x + 24f, y + 104f, mValPaint)
 
             val mUnitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#F97316")
+                color = Color.parseColor("#C8F04A")
                 textSize = 24f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
@@ -214,11 +204,11 @@ object CanvaShareCardGenerator {
         val ribbonRect = RectF(80f, ribbonTop, (CARD_WIDTH - 80).toFloat(), ribbonBottom)
 
         val ribbonBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#121215")
+            color = Color.parseColor("#13221A")
             style = Paint.Style.FILL
         }
         val ribbonBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#27272A")
+            color = Color.parseColor("#1E3328")
             style = Paint.Style.STROKE
             strokeWidth = 2f
         }
@@ -226,7 +216,7 @@ object CanvaShareCardGenerator {
         canvas.drawRoundRect(ribbonRect, 16f, 16f, ribbonBorderPaint)
 
         val elevTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#A1A1AA")
+            color = Color.parseColor("#A9BDB0")
             textSize = 24f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
@@ -273,8 +263,8 @@ object CanvaShareCardGenerator {
         val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = LinearGradient(
                 0f, graphT, 0f, graphB,
-                Color.parseColor("#66F97316"),
-                Color.parseColor("#05F97316"),
+                Color.parseColor("#66C8F04A"),
+                Color.parseColor("#081F5A3A"),
                 Shader.TileMode.CLAMP
             )
             style = Paint.Style.FILL
@@ -282,7 +272,7 @@ object CanvaShareCardGenerator {
         canvas.drawPath(fillPath, fillPaint)
 
         val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#F97316")
+            color = Color.parseColor("#C8F04A")
             style = Paint.Style.STROKE
             strokeWidth = 4f
         }
@@ -292,11 +282,11 @@ object CanvaShareCardGenerator {
         val badgeY = 1490f
         val badgeRect = RectF(80f, badgeY, (CARD_WIDTH - 80).toFloat(), badgeY + 160f)
         val badgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#2E1065")
+            color = Color.parseColor("#1F5A3A")
             style = Paint.Style.FILL
         }
         val badgeBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#8B5CF6")
+            color = Color.parseColor("#C8F04A")
             style = Paint.Style.STROKE
             strokeWidth = 3f
         }
@@ -304,12 +294,12 @@ object CanvaShareCardGenerator {
         canvas.drawRoundRect(badgeRect, 20f, 20f, badgeBorderPaint)
 
         val badgeTitle = if (summary.detectedFtpWatts != null) {
-            "🏆 NEW ESTIMATED FTP: ${summary.detectedFtpWatts} W"
+            "NEW ESTIMATED FTP: ${summary.detectedFtpWatts} W"
         } else {
-            "⭐ TARGET COMPLIANCE: ${summary.overallCompliancePercent.roundToInt()}% (${summary.totalStarsEarned}/${summary.maxStarsPossible} STARS)"
+            "TARGET COMPLIANCE: ${summary.overallCompliancePercent.roundToInt()}% (${summary.totalStarsEarned}/${summary.maxStarsPossible} STARS)"
         }
         val badgeTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#DDD6FE")
+            color = Color.parseColor("#C8F04A")
             textSize = 34f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
@@ -321,7 +311,7 @@ object CanvaShareCardGenerator {
             "Completed all interval segments within targeted power brackets"
         }
         val badgeSubPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#A78BFA")
+            color = Color.parseColor("#F4F7F2")
             textSize = 24f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
         }
@@ -329,13 +319,13 @@ object CanvaShareCardGenerator {
 
         // 8. Footer Branding
         val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#52525B")
+            color = Color.parseColor("#A9BDB0")
             textSize = 24f
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
             textAlign = Paint.Align.CENTER
         }
-        canvas.drawText("BUILT WITH GOOGLE ANTIGRAVITY • THREE.JS 3D HUD", CARD_WIDTH / 2f, 1780f, footerPaint)
-        canvas.drawText("DESIGNED WITH CANVA SOCIAL SUITE", CARD_WIDTH / 2f, 1820f, footerPaint)
+        canvas.drawText("LAZYFITBIKE · THREE.JS 3D CYCLING COCKPIT", CARD_WIDTH / 2f, 1780f, footerPaint)
+        canvas.drawText("SHARED TELEMETRY STORY CARD", CARD_WIDTH / 2f, 1820f, footerPaint)
 
         return bitmap
     }

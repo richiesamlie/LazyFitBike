@@ -45,6 +45,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -246,7 +247,11 @@ private object OsmTileProxy {
 
     fun interceptIfTileRequest(context: Context, request: WebResourceRequest?): WebResourceResponse? {
         val url = request?.url?.toString() ?: return null
-        if (!url.contains("tile.openstreetmap.org") && !url.contains("basemaps.cartocdn.com")) {
+        if (!url.contains("tile-cyclosm.openstreetmap.fr") &&
+            !url.contains("tile.opentopomap.org") &&
+            !url.contains("tile.openstreetmap.org") &&
+            !url.contains("basemaps.cartocdn.com")
+        ) {
             return null
         }
         val match = tileUrlRegex.find(url) ?: return null
@@ -269,7 +274,7 @@ private object OsmTileProxy {
     }
 
     fun fetchTileBytes(context: Context, z: Int, x: Int, y: Int): ByteArray? {
-        val cacheDir = File(context.cacheDir, "osm_tiles")
+        val cacheDir = File(context.cacheDir, "map_tiles_v3")
         if (!cacheDir.exists()) cacheDir.mkdirs()
         val cacheFile = File(cacheDir, "${z}_${x}_${y}.png")
         if (cacheFile.exists() && cacheFile.length() > 256L) {
@@ -277,8 +282,9 @@ private object OsmTileProxy {
         }
 
         val candidateUrls = listOf(
-            "https://tile.openstreetmap.org/$z/$x/$y.png",
-            "https://a.basemaps.cartocdn.com/rastertiles/voyager/$z/$x/$y.png"
+            "https://a.tile-cyclosm.openstreetmap.fr/cyclosm/$z/$x/$y.png",
+            "https://b.tile-cyclosm.openstreetmap.fr/cyclosm/$z/$x/$y.png",
+            "https://a.tile.opentopomap.org/$z/$x/$y.png"
         )
         for (urlStr in candidateUrls) {
             val downloaded = runCatching {
@@ -306,12 +312,14 @@ private object OsmTileProxy {
     }
 }
 
-private val BgCarbonHud = Color(0xE609090B)
-private val BgControlDark = Color(0xFF18181B)
-private val BorderZinc = Color(0xFF27272A)
-private val TextPrimaryWhite = Color(0xFFF4F4F5)
-private val TextMutedZinc = Color(0xFFA1A1AA)
-private val AccentOrange = Color(0xFFF97316)
+private val BgCarbonHud = Color(0xE60B1510)
+private val BgControlDark = Color(0xFF13221A)
+private val BorderZinc = Color(0xFF1E3328)
+private val TextPrimaryWhite = Color(0xFFF4F7F2)
+private val TextMutedZinc = Color(0xFFA9BDB0)
+private val AccentLime = Color(0xFFC8F04A)
+private val InkDark = Color(0xFF0B1510)
+private val AccentForest = Color(0xFF1F5A3A)
 private val SignalRose = Color(0xFFFB7185)
 private val SignalEmerald = Color(0xFF34D399)
 private val SignalAmber = Color(0xFFFBBF24)
@@ -323,6 +331,21 @@ private val Zone4Amber = Color(0xFFFBBF24)
 private val Zone5Red = Color(0xFFF43F5E)
 
 private val TabularStyle = TextStyle(fontFeatureSettings = "tnum")
+
+@Composable
+private fun lazyFitTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = TextPrimaryWhite,
+    unfocusedTextColor = TextPrimaryWhite,
+    focusedContainerColor = BgControlDark,
+    unfocusedContainerColor = BgControlDark,
+    focusedBorderColor = AccentLime,
+    unfocusedBorderColor = TextMutedZinc,
+    focusedLabelColor = AccentLime,
+    unfocusedLabelColor = TextMutedZinc,
+    focusedPlaceholderColor = TextMutedZinc,
+    unfocusedPlaceholderColor = TextMutedZinc,
+    cursorColor = AccentLime
+)
 
 private fun pushRoutePolylineToWebView(view: WebView?, polylineJson: String) {
     val escaped = polylineJson.replace("'", "\\'")
@@ -491,7 +514,7 @@ fun LazyFitBikeCockpitScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF09090B))
+            .background(InkDark)
     ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -553,17 +576,17 @@ fun LazyFitBikeCockpitScreen(
                         Row(
                             modifier = Modifier
                                 .heightIn(min = 48.dp)
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(50))
                                 .background(BgCarbonHud)
-                                .border(1.dp, BorderZinc, RoundedCornerShape(10.dp))
+                                .border(1.dp, BorderZinc, RoundedCornerShape(50))
                                 .clickable { onSetMapModalOpen(!state.isMapModalOpen) }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             val dotColor = when (state.connectionState) {
                                 ConnectionState.LIVE_WATCH -> SignalEmerald
-                                ConnectionState.DEMO_MODE -> AccentOrange
+                                ConnectionState.DEMO_MODE -> AccentLime
                                 ConnectionState.WAITING_FOR_WATCH,
                                 ConnectionState.SIGNAL_LOST -> SignalAmber
                             }
@@ -590,13 +613,13 @@ fun LazyFitBikeCockpitScreen(
                             modifier = Modifier
                                 .heightIn(min = 48.dp)
                                 .widthIn(min = 48.dp),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = BgCarbonHud,
-                                contentColor = if (state.sensorMode == "WRIST") SignalRose else AccentOrange
+                                contentColor = if (state.sensorMode == "WRIST") SignalRose else AccentLime
                             ),
                             border = androidx.compose.foundation.BorderStroke(1.dp, BorderZinc),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
                                 text = state.sensorMode,
@@ -610,22 +633,22 @@ fun LazyFitBikeCockpitScreen(
                     Row(
                         modifier = Modifier
                             .heightIn(min = 48.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(50))
                             .background(BgCarbonHud)
-                            .border(1.dp, BorderZinc, RoundedCornerShape(10.dp))
+                            .border(1.dp, BorderZinc, RoundedCornerShape(50))
                             .clickable(onClick = onCycleCamera)
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
                         Text(
-                            text = "3D VISOR HUD",
-                            color = AccentOrange,
+                            text = "CYCLING COCKPIT",
+                            color = AccentLime,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Black
                         )
                         Text(
-                            text = "•",
+                            text = "·",
                             color = TextMutedZinc,
                             fontSize = 11.sp
                         )
@@ -641,10 +664,10 @@ fun LazyFitBikeCockpitScreen(
                     Row(
                         modifier = Modifier
                             .heightIn(min = 48.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(50))
                             .background(BgCarbonHud)
-                            .border(1.dp, BorderZinc, RoundedCornerShape(10.dp))
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                            .border(1.dp, BorderZinc, RoundedCornerShape(50))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -660,12 +683,12 @@ fun LazyFitBikeCockpitScreen(
                             modifier = Modifier
                                 .heightIn(min = 48.dp)
                                 .widthIn(min = 48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.isMapModalOpen) AccentOrange else BgControlDark,
-                                contentColor = TextPrimaryWhite
+                                containerColor = if (state.isMapModalOpen) AccentLime else BgControlDark,
+                                contentColor = if (state.isMapModalOpen) InkDark else TextPrimaryWhite
                             ),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                         ) {
                             Text(text = "Map", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
@@ -678,10 +701,10 @@ fun LazyFitBikeCockpitScreen(
                     Row(
                         modifier = Modifier
                             .align(Alignment.CenterHorizontally)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(50))
                             .background(BgCarbonHud)
-                            .border(1.dp, SignalAmber, RoundedCornerShape(10.dp))
-                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                            .border(1.dp, SignalAmber, RoundedCornerShape(50))
+                            .padding(horizontal = 14.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
@@ -699,15 +722,16 @@ fun LazyFitBikeCockpitScreen(
                         Button(
                             onClick = onToggleDemo,
                             modifier = Modifier.heightIn(min = 36.dp),
+                            shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = AccentOrange,
-                                contentColor = TextPrimaryWhite
+                                containerColor = AccentLime,
+                                contentColor = InkDark
                             )
                         ) {
                             Text(
                                 text = "Enable Demo Slider",
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Black
                             )
                         }
                     }
@@ -735,7 +759,7 @@ fun LazyFitBikeCockpitScreen(
                         ) {
                             Text(
                                 text = "ONLINE MAPS & ROUTES",
-                                color = AccentOrange,
+                                color = AccentLime,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Black
                             )
@@ -764,12 +788,12 @@ fun LazyFitBikeCockpitScreen(
                                     .heightIn(min = 46.dp),
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = AccentOrange,
-                                    contentColor = Color.White
+                                    containerColor = AccentLime,
+                                    contentColor = InkDark
                                 )
                             ) {
                                 Text(
-                                    text = "📍 Locate Me (GPS)",
+                                    text = "Locate GPS",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Black
                                 )
@@ -820,16 +844,16 @@ fun LazyFitBikeCockpitScreen(
                                     .fillMaxWidth()
                                     .padding(vertical = 3.dp)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0x33F97316))
-                                    .border(1.dp, AccentOrange, RoundedCornerShape(8.dp))
+                                    .background(Color(0x28C8F04A))
+                                    .border(1.dp, AccentLime, RoundedCornerShape(8.dp))
                                     .padding(8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "📍 ${state.activeRouteName}",
-                                        color = AccentOrange,
+                                        text = state.activeRouteName,
+                                        color = AccentLime,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Black
                                     )
@@ -856,10 +880,10 @@ fun LazyFitBikeCockpitScreen(
                                     .fillMaxWidth()
                                     .padding(vertical = 3.dp)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) Color(0x33F97316) else BgControlDark)
+                                    .background(if (isSelected) Color(0x28C8F04A) else BgControlDark)
                                     .border(
                                         1.dp,
-                                        if (isSelected) AccentOrange else BorderZinc,
+                                        if (isSelected) AccentLime else BorderZinc,
                                         RoundedCornerShape(8.dp)
                                     )
                                     .clickable { onSelectPresetRoute(preset.id) }
@@ -870,7 +894,7 @@ fun LazyFitBikeCockpitScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = preset.name,
-                                        color = if (isSelected) AccentOrange else TextPrimaryWhite,
+                                        color = if (isSelected) AccentLime else TextPrimaryWhite,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -907,8 +931,8 @@ fun LazyFitBikeCockpitScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = if (hasGmpKey) "● GOOGLE MAPS + ELEVATION" else "● OSRM FREE ROUTING",
-                                color = if (hasGmpKey) SignalEmerald else Zone2Blue,
+                                text = if (hasGmpKey) "GOOGLE MAPS + ELEVATION" else "OSRM FREE ROUTING",
+                                color = if (hasGmpKey) SignalEmerald else AccentLime,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Black
                             )
@@ -932,6 +956,7 @@ fun LazyFitBikeCockpitScreen(
                                 )
                             },
                             singleLine = true,
+                            colors = lazyFitTextFieldColors(),
                             modifier = Modifier.fillMaxWidth()
                         )
 
@@ -945,7 +970,7 @@ fun LazyFitBikeCockpitScreen(
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (hasGmpKey) SignalEmerald else BgControlDark,
-                                contentColor = if (hasGmpKey) Color.Black else TextPrimaryWhite
+                                contentColor = if (hasGmpKey) InkDark else TextPrimaryWhite
                             )
                         ) {
                             Text(
@@ -985,7 +1010,7 @@ fun LazyFitBikeCockpitScreen(
                         ) {
                             Text(
                                 text = "STRAVA CO-OP & GPX TELEMETRY SYNC",
-                                color = AccentOrange,
+                                color = AccentLime,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Black
                             )
@@ -1042,14 +1067,14 @@ fun LazyFitBikeCockpitScreen(
                                 .heightIn(min = 48.dp),
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = AccentOrange,
-                                contentColor = TextPrimaryWhite
+                                containerColor = AccentLime,
+                                contentColor = InkDark
                             )
                         ) {
                             Text(
                                 text = "1. Export & Share .GPX File (GPS + HR + Cadence + Watts)",
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Black
                             )
                         }
 
@@ -1065,6 +1090,7 @@ fun LazyFitBikeCockpitScreen(
                                 )
                             },
                             singleLine = true,
+                            colors = lazyFitTextFieldColors(),
                             modifier = Modifier.fillMaxWidth()
                         )
 
@@ -1102,7 +1128,7 @@ fun LazyFitBikeCockpitScreen(
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = SignalEmerald,
-                                    contentColor = Color.Black
+                                    contentColor = InkDark
                                 )
                             ) {
                                 Text("Sheets CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -1114,8 +1140,8 @@ fun LazyFitBikeCockpitScreen(
                                     .heightIn(min = 42.dp),
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF7C3AED),
-                                    contentColor = Color.White
+                                    containerColor = AccentForest,
+                                    contentColor = TextPrimaryWhite
                                 )
                             ) {
                                 Text("Canva Story", fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -1127,8 +1153,8 @@ fun LazyFitBikeCockpitScreen(
                                     .heightIn(min = 42.dp),
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF1E3A8A),
-                                    contentColor = Color(0xFF93C5FD)
+                                    containerColor = BgControlDark,
+                                    contentColor = TextPrimaryWhite
                                 )
                             ) {
                                 Text("Drive Vault", fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -1167,7 +1193,7 @@ fun LazyFitBikeCockpitScreen(
                             Column {
                                 Text(
                                     text = "GITHUB RELEASES OTA UPDATER",
-                                    color = AccentOrange,
+                                    color = AccentLime,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Black
                                 )
@@ -1225,7 +1251,7 @@ fun LazyFitBikeCockpitScreen(
                                 .fillMaxWidth()
                                 .height(6.dp)
                                 .clip(RoundedCornerShape(4.dp)),
-                            color = AccentOrange,
+                            color = AccentLime,
                             trackColor = BgControlDark
                         )
 
@@ -1272,14 +1298,14 @@ fun LazyFitBikeCockpitScreen(
                                     .heightIn(min = 48.dp),
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isPhoneUpToDate) BgControlDark else AccentOrange,
-                                    contentColor = if (isPhoneUpToDate) SignalEmerald else TextPrimaryWhite
+                                    containerColor = if (isPhoneUpToDate) BgControlDark else AccentLime,
+                                    contentColor = if (isPhoneUpToDate) SignalEmerald else InkDark
                                 )
                             ) {
                                 Text(
                                     text = if (isPhoneUpToDate) "Up to Date (${state.installedVersionName})" else "Update Phone APK",
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Black
                                 )
                             }
                         }
@@ -1314,7 +1340,7 @@ fun LazyFitBikeCockpitScreen(
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = BgControlDark,
-                                contentColor = AccentOrange
+                                contentColor = AccentLime
                             )
                         ) {
                             Text(
@@ -1359,7 +1385,7 @@ fun LazyFitBikeCockpitScreen(
                         modifier = Modifier
                             .fillMaxWidth(0.92f)
                             .verticalScroll(rememberScrollState()),
-                        borderColor = AccentOrange
+                        borderColor = AccentLime
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1368,7 +1394,7 @@ fun LazyFitBikeCockpitScreen(
                         ) {
                             Text(
                                 text = "RIDER PROFILE & 5-ZONE CALIBRATION",
-                                color = AccentOrange,
+                                color = AccentLime,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Black
                             )
@@ -1396,6 +1422,7 @@ fun LazyFitBikeCockpitScreen(
                                 onValueChange = { weightInput = it.filter { ch -> ch.isDigit() || ch == '.' } },
                                 label = { Text("Rider Weight (kg)", fontSize = 10.sp) },
                                 singleLine = true,
+                                colors = lazyFitTextFieldColors(),
                                 modifier = Modifier.weight(1f)
                             )
                             OutlinedTextField(
@@ -1403,6 +1430,7 @@ fun LazyFitBikeCockpitScreen(
                                 onValueChange = { bikeWeightInput = it.filter { ch -> ch.isDigit() || ch == '.' } },
                                 label = { Text("Bike Weight (kg)", fontSize = 10.sp) },
                                 singleLine = true,
+                                colors = lazyFitTextFieldColors(),
                                 modifier = Modifier.weight(1f)
                             )
                             OutlinedTextField(
@@ -1410,6 +1438,7 @@ fun LazyFitBikeCockpitScreen(
                                 onValueChange = { ageInput = it.filter { ch -> ch.isDigit() } },
                                 label = { Text("Age (yrs)", fontSize = 10.sp) },
                                 singleLine = true,
+                                colors = lazyFitTextFieldColors(),
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -1425,6 +1454,7 @@ fun LazyFitBikeCockpitScreen(
                                 onValueChange = { ftpInput = it.filter { ch -> ch.isDigit() } },
                                 label = { Text("FTP Power (Watts)", fontSize = 10.sp) },
                                 singleLine = true,
+                                colors = lazyFitTextFieldColors(),
                                 modifier = Modifier.weight(1f)
                             )
                             OutlinedTextField(
@@ -1432,6 +1462,7 @@ fun LazyFitBikeCockpitScreen(
                                 onValueChange = { restHrInput = it.filter { ch -> ch.isDigit() } },
                                 label = { Text("Resting HR (BPM)", fontSize = 10.sp) },
                                 singleLine = true,
+                                colors = lazyFitTextFieldColors(),
                                 modifier = Modifier.weight(1f)
                             )
                             OutlinedTextField(
@@ -1439,6 +1470,7 @@ fun LazyFitBikeCockpitScreen(
                                 onValueChange = { maxHrInput = it.filter { ch -> ch.isDigit() } },
                                 label = { Text("Max HR (BPM)", fontSize = 10.sp) },
                                 singleLine = true,
+                                colors = lazyFitTextFieldColors(),
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -1526,6 +1558,7 @@ fun LazyFitBikeCockpitScreen(
                             label = { Text("Live Spectator URL (Vercel / Next.js)", fontSize = 10.sp) },
                             placeholder = { Text("https://spectator.vercel.app/api/telemetry", fontSize = 10.sp) },
                             singleLine = true,
+                            colors = lazyFitTextFieldColors(),
                             modifier = Modifier.fillMaxWidth()
                         )
 
@@ -1549,8 +1582,8 @@ fun LazyFitBikeCockpitScreen(
                                 .heightIn(min = 46.dp),
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = AccentOrange,
-                                contentColor = TextPrimaryWhite
+                                containerColor = AccentLime,
+                                contentColor = InkDark
                             )
                         ) {
                             Text(
@@ -1573,7 +1606,7 @@ fun LazyFitBikeCockpitScreen(
                         modifier = Modifier
                             .fillMaxWidth(0.94f)
                             .fillMaxHeight(0.85f),
-                        borderColor = AccentOrange
+                        borderColor = AccentLime
                     ) {
                         Column(
                             modifier = Modifier
@@ -1588,7 +1621,7 @@ fun LazyFitBikeCockpitScreen(
                             ) {
                                 Text(
                                     text = "STRUCTURED WORKOUT LIBRARY",
-                                    color = AccentOrange,
+                                    color = AccentLime,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Black
                                 )
@@ -1598,8 +1631,8 @@ fun LazyFitBikeCockpitScreen(
                                         modifier = Modifier.heightIn(min = 36.dp),
                                         shape = RoundedCornerShape(8.dp),
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = Color(0xFF1E3A8A),
-                                            contentColor = Color(0xFF93C5FD)
+                                            containerColor = AccentForest,
+                                            contentColor = TextPrimaryWhite
                                         )
                                     ) {
                                         Text("Import .ZWO", fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -1647,29 +1680,29 @@ fun LazyFitBikeCockpitScreen(
                                                 fontSize = 13.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
+                                            val badgeBg = when (w.category) {
+                                                WorkoutType.RAMP_TEST -> AccentLime
+                                                WorkoutType.VO2_MAX -> SignalRose
+                                                WorkoutType.SWEET_SPOT -> AccentForest
+                                                WorkoutType.THRESHOLD -> SignalAmber
+                                                else -> SignalEmerald
+                                            }
+                                            val badgeFg = if (w.category == WorkoutType.SWEET_SPOT) TextPrimaryWhite else InkDark
                                             Box(
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(4.dp))
-                                                    .background(
-                                                        when (w.category) {
-                                                            WorkoutType.RAMP_TEST -> Color(0xFF7C3AED)
-                                                            WorkoutType.VO2_MAX -> SignalRose
-                                                            WorkoutType.SWEET_SPOT -> AccentOrange
-                                                            WorkoutType.THRESHOLD -> SignalAmber
-                                                            else -> SignalEmerald
-                                                        }
-                                                    )
+                                                    .background(badgeBg)
                                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                                             ) {
                                                 Text(
                                                     text = w.category.name,
-                                                    color = Color.White,
+                                                    color = badgeFg,
                                                     fontSize = 9.sp,
                                                     fontWeight = FontWeight.Black
                                                 )
                                             }
                                             Text(
-                                                text = "$mins mins • ${w.steps.size} steps",
+                                                text = "$mins mins · ${w.steps.size} steps",
                                                 color = TextMutedZinc,
                                                 fontSize = 11.sp
                                             )
@@ -1692,8 +1725,8 @@ fun LazyFitBikeCockpitScreen(
                                             modifier = Modifier.heightIn(min = 40.dp),
                                             shape = RoundedCornerShape(6.dp),
                                             colors = ButtonDefaults.buttonColors(
-                                                containerColor = Color(0xFF1E3A8A),
-                                                contentColor = Color(0xFF93C5FD)
+                                                containerColor = AccentForest,
+                                                contentColor = TextPrimaryWhite
                                             )
                                         ) {
                                             Text("Schedule", fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -1703,8 +1736,8 @@ fun LazyFitBikeCockpitScreen(
                                             modifier = Modifier.heightIn(min = 40.dp),
                                             shape = RoundedCornerShape(6.dp),
                                             colors = ButtonDefaults.buttonColors(
-                                                containerColor = AccentOrange,
-                                                contentColor = Color.White
+                                                containerColor = AccentLime,
+                                                contentColor = InkDark
                                             )
                                         ) {
                                             Text("Start", fontSize = 11.sp, fontWeight = FontWeight.Black)
@@ -1718,16 +1751,16 @@ fun LazyFitBikeCockpitScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF0F172A))
-                                    .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(8.dp))
+                                    .background(BgControlDark)
+                                    .border(1.dp, AccentForest, RoundedCornerShape(8.dp))
                                     .padding(10.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "⚡ AI WORKOUT CREATOR (GEMINI)",
-                                        color = Color(0xFF38BDF8),
+                                        text = "AI WORKOUT CREATOR (GEMINI)",
+                                        color = AccentLime,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Black
                                     )
@@ -1737,7 +1770,8 @@ fun LazyFitBikeCockpitScreen(
                                         modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
                                         textStyle = TextStyle(color = TextPrimaryWhite, fontSize = 11.sp),
                                         placeholder = { Text("e.g. 30 min VO2 max attack", fontSize = 11.sp, color = TextMutedZinc) },
-                                        singleLine = true
+                                        singleLine = true,
+                                        colors = lazyFitTextFieldColors()
                                     )
                                 }
                                 Button(
@@ -1745,8 +1779,8 @@ fun LazyFitBikeCockpitScreen(
                                     modifier = Modifier.heightIn(min = 40.dp),
                                     shape = RoundedCornerShape(6.dp),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF0284C7),
-                                        contentColor = Color.White
+                                        containerColor = AccentLime,
+                                        contentColor = InkDark
                                     )
                                 ) {
                                     Text("Generate & Ride", fontSize = 11.sp, fontWeight = FontWeight.Black)
@@ -1809,22 +1843,22 @@ fun LazyFitBikeCockpitScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFF2E1065))
-                                        .border(1.dp, Color(0xFFA78BFA), RoundedCornerShape(8.dp))
+                                        .background(AccentForest)
+                                        .border(1.dp, AccentLime, RoundedCornerShape(8.dp))
                                         .padding(12.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column {
                                         Text(
-                                            text = "🏆 NEW ESTIMATED FTP: ${sum.detectedFtpWatts} W",
-                                            color = Color(0xFFDDD6FE),
+                                            text = "NEW ESTIMATED FTP: ${sum.detectedFtpWatts} W",
+                                            color = AccentLime,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Black
                                         )
                                         Text(
                                             text = "Previous FTP: ${sum.previousFtpWatts} W (${if (sum.detectedFtpWatts >= sum.previousFtpWatts) "+" else ""}${sum.detectedFtpWatts - sum.previousFtpWatts} W)",
-                                            color = Color(0xFFA78BFA),
+                                            color = TextPrimaryWhite,
                                             fontSize = 11.sp
                                         )
                                     }
@@ -1832,8 +1866,8 @@ fun LazyFitBikeCockpitScreen(
                                         onClick = { onApplyNewFtp(sum.detectedFtpWatts) },
                                         shape = RoundedCornerShape(6.dp),
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = Color(0xFF7C3AED),
-                                            contentColor = Color.White
+                                            containerColor = AccentLime,
+                                            contentColor = InkDark
                                         )
                                     ) {
                                         Text("Apply & Sync", fontSize = 11.sp, fontWeight = FontWeight.Black)
@@ -1887,7 +1921,7 @@ fun LazyFitBikeCockpitScreen(
                                     MetricColumn(
                                         label = "COMPLIANCE",
                                         value = "${sum.overallCompliancePercent.toInt()}%",
-                                        unit = "★ ${sum.totalStarsEarned}/${sum.maxStarsPossible}"
+                                        unit = "${sum.totalStarsEarned}/${sum.maxStarsPossible} STARS"
                                     )
                                 }
                             }
@@ -1932,14 +1966,14 @@ fun LazyFitBikeCockpitScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFF0F172A))
-                                        .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(8.dp))
+                                        .background(BgControlDark)
+                                        .border(1.dp, AccentForest, RoundedCornerShape(8.dp))
                                         .padding(12.dp)
                                 ) {
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         Text(
-                                            text = "🤖 AI COACH DEBRIEF (GEMINI SPORTS SCIENCE)",
-                                            color = Color(0xFF38BDF8),
+                                            text = "AI COACH DEBRIEF (GEMINI SPORTS SCIENCE)",
+                                            color = AccentLime,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Black
                                         )
@@ -1961,8 +1995,8 @@ fun LazyFitBikeCockpitScreen(
                                     .heightIn(min = 48.dp),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = AccentOrange,
-                                    contentColor = Color.White
+                                    containerColor = AccentLime,
+                                    contentColor = InkDark
                                 )
                             ) {
                                 Text("Share Workout to Strava (GPX)", fontSize = 13.sp, fontWeight = FontWeight.Black)
@@ -1981,7 +2015,7 @@ fun LazyFitBikeCockpitScreen(
                                     shape = RoundedCornerShape(8.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = SignalEmerald,
-                                        contentColor = Color.Black
+                                        contentColor = InkDark
                                     )
                                 ) {
                                     Text("Sheets CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -1993,8 +2027,8 @@ fun LazyFitBikeCockpitScreen(
                                         .heightIn(min = 40.dp),
                                     shape = RoundedCornerShape(8.dp),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF7C3AED), // Canva Purple
-                                        contentColor = Color.White
+                                        containerColor = AccentForest,
+                                        contentColor = TextPrimaryWhite
                                     )
                                 ) {
                                     Text("Canva Story", fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -2006,8 +2040,8 @@ fun LazyFitBikeCockpitScreen(
                                         .heightIn(min = 40.dp),
                                     shape = RoundedCornerShape(8.dp),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF1E3A8A), // Drive Blue
-                                        contentColor = Color(0xFF93C5FD)
+                                        containerColor = BgControlDark,
+                                        contentColor = TextPrimaryWhite
                                     )
                                 ) {
                                     Text("Drive Vault", fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -2100,7 +2134,7 @@ fun LazyFitBikeCockpitScreen(
             if (state.isWorkoutActive) {
                 HudPod(
                     modifier = Modifier.fillMaxWidth(),
-                    borderColor = AccentOrange
+                    borderColor = AccentLime
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2118,12 +2152,12 @@ fun LazyFitBikeCockpitScreen(
                                 modifier = Modifier.heightIn(min = 52.dp),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (state.isWorkoutPaused) SignalEmerald else BgControlDark,
-                                    contentColor = TextPrimaryWhite
+                                    containerColor = if (state.isWorkoutPaused) AccentLime else BgControlDark,
+                                    contentColor = if (state.isWorkoutPaused) InkDark else TextPrimaryWhite
                                 )
                             ) {
                                 Text(
-                                    text = if (state.isWorkoutPaused) "▶ Resume" else "⏸ Pause",
+                                    text = if (state.isWorkoutPaused) "Resume" else "Pause",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Black
                                 )
@@ -2137,7 +2171,7 @@ fun LazyFitBikeCockpitScreen(
                                     contentColor = TextPrimaryWhite
                                 )
                             ) {
-                                Text("⏭ Skip Step", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Skip Step", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -2160,7 +2194,7 @@ fun LazyFitBikeCockpitScreen(
                             }
                             Text(
                                 text = (if (state.workoutIntensityBiasPercent > 0) "+" else "") + "${state.workoutIntensityBiasPercent}%",
-                                color = if (state.workoutIntensityBiasPercent != 0) AccentOrange else TextPrimaryWhite,
+                                color = if (state.workoutIntensityBiasPercent != 0) AccentLime else TextPrimaryWhite,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 12.sp,
                                 style = TabularStyle
@@ -2188,7 +2222,7 @@ fun LazyFitBikeCockpitScreen(
                                 contentColor = Color(0xFFFCA5A5)
                             )
                         ) {
-                            Text("⏹ End", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("End", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -2209,7 +2243,7 @@ fun LazyFitBikeCockpitScreen(
                         Button(
                             onClick = onToggleSensorMode,
                             modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = BgControlDark,
                                 contentColor = TextPrimaryWhite
@@ -2225,10 +2259,10 @@ fun LazyFitBikeCockpitScreen(
                         Button(
                             onClick = { onSetProfileModalOpen(!state.isProfileModalOpen) },
                             modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.isProfileModalOpen) AccentOrange else BgControlDark,
-                                contentColor = TextPrimaryWhite
+                                containerColor = if (state.isProfileModalOpen) AccentLime else BgControlDark,
+                                contentColor = if (state.isProfileModalOpen) InkDark else TextPrimaryWhite
                             )
                         ) {
                             Text(
@@ -2241,7 +2275,7 @@ fun LazyFitBikeCockpitScreen(
                         Button(
                             onClick = onCycleCamera,
                             modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = BgControlDark,
                                 contentColor = TextPrimaryWhite
@@ -2257,10 +2291,10 @@ fun LazyFitBikeCockpitScreen(
                         Button(
                             onClick = { onSetMapModalOpen(!state.isMapModalOpen) },
                             modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.isMapModalOpen) AccentOrange else BgControlDark,
-                                contentColor = TextPrimaryWhite
+                                containerColor = if (state.isMapModalOpen) AccentLime else BgControlDark,
+                                contentColor = if (state.isMapModalOpen) InkDark else TextPrimaryWhite
                             )
                         ) {
                             Text(
@@ -2273,10 +2307,10 @@ fun LazyFitBikeCockpitScreen(
                         Button(
                             onClick = { onSetStravaModalOpen(!state.isStravaModalOpen) },
                             modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.isStravaModalOpen) AccentOrange else BgControlDark,
-                                contentColor = TextPrimaryWhite
+                                containerColor = if (state.isStravaModalOpen) AccentLime else BgControlDark,
+                                contentColor = if (state.isStravaModalOpen) InkDark else TextPrimaryWhite
                             )
                         ) {
                             Text(
@@ -2289,10 +2323,10 @@ fun LazyFitBikeCockpitScreen(
                         Button(
                             onClick = { onSetUpdateModalOpen(!state.isUpdateModalOpen) },
                             modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.isUpdateModalOpen) AccentOrange else BgControlDark,
-                                contentColor = TextPrimaryWhite
+                                containerColor = if (state.isUpdateModalOpen) AccentLime else BgControlDark,
+                                contentColor = if (state.isUpdateModalOpen) InkDark else TextPrimaryWhite
                             )
                         ) {
                             Text(
@@ -2305,10 +2339,10 @@ fun LazyFitBikeCockpitScreen(
                         Button(
                             onClick = { onSetWorkoutModalOpen(!state.isWorkoutModalOpen) },
                             modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (state.isWorkoutModalOpen || state.isWorkoutActive) AccentOrange else BgControlDark,
-                                contentColor = TextPrimaryWhite
+                                containerColor = if (state.isWorkoutModalOpen || state.isWorkoutActive) AccentLime else BgControlDark,
+                                contentColor = if (state.isWorkoutModalOpen || state.isWorkoutActive) InkDark else TextPrimaryWhite
                             )
                         ) {
                             Text(
@@ -2321,14 +2355,18 @@ fun LazyFitBikeCockpitScreen(
                         Button(
                             onClick = onToggleDemo,
                             modifier = Modifier.heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (state.connectionState == ConnectionState.DEMO_MODE) {
-                                    AccentOrange
+                                    AccentLime
                                 } else {
                                     BgControlDark
                                 },
-                                contentColor = TextPrimaryWhite
+                                contentColor = if (state.connectionState == ConnectionState.DEMO_MODE) {
+                                    InkDark
+                                } else {
+                                    TextPrimaryWhite
+                                }
                             )
                         ) {
                             Text(
@@ -2356,8 +2394,8 @@ fun LazyFitBikeCockpitScreen(
                                     onValueChange = onDemoEffortChange,
                                     valueRange = 0f..130f,
                                     colors = SliderDefaults.colors(
-                                        thumbColor = AccentOrange,
-                                        activeTrackColor = AccentOrange
+                                        thumbColor = AccentLime,
+                                        activeTrackColor = AccentLime
                                     )
                                 )
                             }
@@ -2395,7 +2433,7 @@ fun LazyFitBikeCockpitScreen(
                         Text(
                             text = "${state.gear} / 12",
                             style = TabularStyle,
-                            color = AccentOrange,
+                            color = AccentLime,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Black,
                             textAlign = TextAlign.Center,
@@ -2409,8 +2447,8 @@ fun LazyFitBikeCockpitScreen(
                                 .heightIn(min = 56.dp),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = AccentOrange,
-                                contentColor = TextPrimaryWhite
+                                containerColor = AccentLime,
+                                contentColor = InkDark
                             )
                         ) {
                             Text(text = "+", fontSize = 20.sp, fontWeight = FontWeight.Black)
@@ -2454,7 +2492,7 @@ private fun MiniGpsRouteCanvas(
             .fillMaxWidth()
             .height(64.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF1E293B))
+            .background(BgControlDark)
             .border(1.dp, BorderZinc, RoundedCornerShape(8.dp))
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -2466,13 +2504,13 @@ private fun MiniGpsRouteCanvas(
                     dstSize = IntSize(size.width.toInt().coerceAtLeast(1), size.height.toInt().coerceAtLeast(1)),
                     alpha = 0.78f
                 )
-                drawRect(color = Color(0x4409090B))
+                drawRect(color = Color(0x440B1510))
             } else {
                 val step = 18.dp.toPx()
                 var gx = step
                 while (gx < size.width) {
                     drawLine(
-                        color = Color(0x3394A3B8),
+                        color = Color(0x33A9BDB0),
                         start = Offset(gx, 0f),
                         end = Offset(gx, size.height),
                         strokeWidth = 1f
@@ -2482,7 +2520,7 @@ private fun MiniGpsRouteCanvas(
                 var gy = step
                 while (gy < size.height) {
                     drawLine(
-                        color = Color(0x3394A3B8),
+                        color = Color(0x33A9BDB0),
                         start = Offset(0f, gy),
                         end = Offset(size.width, gy),
                         strokeWidth = 1f
@@ -2511,12 +2549,12 @@ private fun MiniGpsRouteCanvas(
                 }
                 drawPath(
                     path = path,
-                    color = Color(0xCC09090B),
+                    color = Color(0xCC0B1510),
                     style = Stroke(width = 8f, cap = StrokeCap.Round)
                 )
                 drawPath(
                     path = path,
-                    color = AccentOrange,
+                    color = AccentLime,
                     style = Stroke(width = 4.5f, cap = StrokeCap.Round)
                 )
 
@@ -2555,12 +2593,12 @@ private fun MiniGpsRouteCanvas(
                     center = Offset(rx, ry)
                 )
                 drawCircle(
-                    color = Color.White,
+                    color = TextPrimaryWhite,
                     radius = 7.5f,
                     center = Offset(rx, ry)
                 )
                 drawCircle(
-                    color = AccentOrange,
+                    color = AccentLime,
                     radius = 5f,
                     center = Offset(rx, ry)
                 )
@@ -2574,7 +2612,7 @@ private fun MiniGpsRouteCanvas(
             fontWeight = FontWeight.Bold,
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .background(Color(0xAA09090B), RoundedCornerShape(topEnd = 6.dp))
+                .background(Color(0xAA0B1510), RoundedCornerShape(topEnd = 6.dp))
                 .padding(horizontal = 6.dp, vertical = 2.dp)
         )
     }
@@ -2588,9 +2626,9 @@ private fun HudPod(
 ) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(BgCarbonHud)
-            .border(1.5.dp, borderColor, RoundedCornerShape(12.dp))
+            .border(1.5.dp, borderColor, RoundedCornerShape(14.dp))
             .padding(9.dp)
     ) {
         content()

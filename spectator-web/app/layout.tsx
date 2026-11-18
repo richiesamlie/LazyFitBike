@@ -1,15 +1,23 @@
 import "./globals.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { Plus_Jakarta_Sans } from "next/font/google";
+
+const plusJakartaSans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  weight: ["500", "600", "700", "800"],
+  display: "swap"
+});
 
 export const metadata: Metadata = {
-  title: "LazyFitBike Live Spectator Companion",
-  description: "Real-time live telemetry stream & 3D track spectator companion for LazyFitBike riders",
-  themeColor: "#09090B",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1
-  }
+  title: "LazyFitBike Live Spectator Cockpit",
+  description:
+    "Real-time cycling telemetry stream, course elevation profile, and spectator cheers for LazyFitBike riders."
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0B1510",
+  width: "device-width",
+  initialScale: 1
 };
 
 export default function RootLayout({
@@ -19,9 +27,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-[#09090B] text-zinc-100 min-h-screen">
-        {children}
-      </body>
+      <body className={plusJakartaSans.className}>{children}</body>
     </html>
   );
 }
